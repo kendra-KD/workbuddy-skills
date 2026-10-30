@@ -1,0 +1,7 @@
+﻿domain,port
+example.com,443
+www.example.com,443
+api.example.com,8443
+# 以上为示例行，使用时请替换为你自己的域名
+# port 列可选，留空默认 443
+# 以 # 开头的行会被自动跳过

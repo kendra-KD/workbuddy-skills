@@ -1,0 +1,48 @@
+# ========================================
+# 隐私与敏感内容 —— 绝不传 GitHub
+# ========================================
+
+# WorkBuddy 工作区元数据（含会话记忆、项目配置）
+.workbuddy/
+
+# 副业共用资料（含收入记录、时间规划，属个人财务隐私）
+_共用/
+
+# 公众号运营资料（账号配置、文案、菜单设计，属运营隐私）
+WX/
+
+# Skill 相关内部文档（执行手册、沟通指南，属个人方法论）
+skills/docs/
+
+# ========================================
+# 开发临时文件
+# ========================================
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 测试临时产物（保留正式源码）
+skills/*/scripts/*.json
+skills/*/scripts/*_test.json
+skills/*/scripts/*_qa*
+skills/*/scripts/smoke_*
+skills/*/scripts/fail_*
+skills/*/scripts/edge_*
+skills/*/scripts/mock_*
+skills/*/scripts/e2e_*
+
+# zip 分发包（源码已上传，zip 不进 git）
+skills/*.zip
+skills/dist/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/

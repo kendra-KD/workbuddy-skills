@@ -1,0 +1,65 @@
+# WorkBuddy Skills
+
+> Kendra 的 WorkBuddy Skill 开源合集 —— 把运维经验沉淀成可复用的自动化技能
+
+## 这是什么？
+
+这里是我在 [WorkBuddy](https://www.workbuddy.cn) 平台上开发和发布的 Skill 源码合集。每个 Skill 是一个独立的自动化技能包，解决一个具体的运维 / 技术 / 办公场景问题。
+
+Skill 可以通过 WorkBuddy 客户端加载，让 AI 助手在对话中自动触发执行。
+
+## Skills 清单
+
+| Skill | 分类 | 说明 | 状态 |
+|-------|------|------|------|
+| [ssl-cert-monitor](./skills/ssl-cert-monitor/) | 运维技术 | SSL/TLS 证书到期批量巡检，按紧急度排序生成 Markdown 报告 + JSON 数据，附 4 平台续签指引 | ✅ 已发布 |
+
+### 分类规划
+
+- **运维技术类**：SSL 巡检、K8s 排障、服务器健康检查、日志分析 ……
+- **其他技术类**：API 调试、代码审查、CI/CD 辅助 ……
+- **日常办公类**：文档处理、表格清洗、会议纪要 ……
+- **生活类**：记账、习惯追踪 ……
+
+## 如何使用？
+
+### 方式一：下载 zip 导入 WorkBuddy
+
+1. 进入对应 Skill 目录，下载该 Skill 的 zip 包（见 Release）
+2. 打开 WorkBuddy 客户端 → 左侧「专家·技能·连接器」
+3. 点「添加技能」→「上传技能」→ 拖入 zip 文件
+4. 安装完成后，在对话里用触发短语调用即可
+
+### 方式二：直接克隆源码
+
+```bash
+git clone https://github.com/kendra-KD/workbuddy-skills.git
+```
+
+把对应 Skill 目录复制到 `~/.workbuddy/skills/` 即可本地使用。
+
+## 每个 Skill 包含什么？
+
+```
+skill-name/
+├── SKILL.md          ← 主入口（元数据 + 工作流程）
+├── scripts/          ← 可执行脚本（纯标准库，零依赖）
+├── references/       ← 参考文档（知识库 + 操作指南）
+├── assets/           ← 模板文件（CSV / 配置示例）
+└── growth_log.md     ← 开发记录（踩坑 + 经验沉淀）
+```
+
+## 技术原则
+
+- **纯标准库优先**：脚本尽量只用 Python 标准库，降低部署门槛
+- **面向普遍场景**：不绑定特定公司 / 域名 / 云厂商
+- **双输出**：人类可读报告 + 机器可读数据
+- **容错优先**：单点失败不中断整体流程
+
+## 关于我
+
+云运维工程师，负责多家公司的服务器 / K8s / 证书管理。在这里把日常运维经验沉淀成 Skill，既自用也分享给社区。
+
+## License
+
+MIT License - 详见 [LICENSE](./LICENSE)
