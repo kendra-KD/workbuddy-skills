@@ -13,6 +13,7 @@ Skill 可以通过 WorkBuddy 客户端加载，让 AI 助手在对话中自动�
 | Skill | 分类 | 说明 | 状态 |
 |-------|------|------|------|
 | [ssl-cert-monitor](./skills/ssl-cert-monitor/) | 运维技术 | SSL/TLS 证书到期批量巡检，按紧急度排序生成 Markdown 报告 + JSON 数据，附 4 平台续签指引 | ✅ 已发布 |
+| [issue-report-formatter](./skills/issue-report-formatter/) | 运维技术 | 运维问题上报格式化器，把零散报错描述+环境信息整理成标准化上报报告，自动分级紧急度，附 5 场景模板+升级流程指引 | ✅ 已发布 |
 
 ### 分类规划
 
