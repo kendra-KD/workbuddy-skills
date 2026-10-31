@@ -1,6 +1,6 @@
 ---
-name: runbook-generator
-slug: runbook-generator
+name: ops-fault-runbook
+slug: ops-fault-runbook
 displayName: 运维故障 Runbook 生成器
 version: 1.0.0
 description: "运维故障 Runbook 生成器。输入故障特征（如 502/503/timeout/证书过期/pod crashloopbackoff/MinIO S3 500/磁盘满/OOM），自动匹配预置实战 runbook，输出结构化排查步骤+验证命令+回退方案+根因假设。触发短语：'故障排查'、'runbook'、'排查步骤'、'怎么排查'、'故障处理流程'、'troubleshoot runbook'、'incident playbook'、'生成排查手册'。面向运维工程师、SRE、技术支持、私有化交付等场景。纯规则引擎，不调 AI API，零成本零延迟。"
