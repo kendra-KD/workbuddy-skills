@@ -90,3 +90,49 @@ def extract_from_text(text):
 **操作**：ssl-cert-monitor（发现问题）→ issue-report-formatter（上报问题），第三个 Skill 可以考虑"解决问题"方向（如 runbook 生成器/故障排查助手）。
 
 **适用场景**：任何做第三个及以后 Skill 的选品决策。
+
+---
+
+### Rule 6 · AI 协作产物用"提示词+清单+假设树"三件套
+
+**规则**：当 Skill 需要让用户"整理信息同步给 AI 辅助解决"时，**不要只生成一段提示词**，而是输出三件套：① 结构化提示词（含角色/任务/约束） ② 排查 checklist（每项含检查什么+怎么查+命令） ③ 诊断假设树（可能原因+验证方法+预期结果）。
+
+**原因**：
+- 只给提示词，AI 容易跳步或直接给"重启试试"这种无根因方案
+- checklist 让用户自己也能照着查，不依赖 AI
+- 假设树给 AI 一个"思考框架"，强制它按顺序逐个验证，验证完一个再下一个
+- 三件套覆盖了"AI 辅助""人工自查""思考框架"三个场景
+
+**操作**：assist 模式输出三份产物，提示词里内嵌 checklist 和假设树，用户复制粘贴一次即可。
+
+**适用场景**：任何需要"整理信息同步给 AI"的 Skill。
+
+---
+
+### Rule 7 · assist 模式只生成提示词，不直接调 AI API
+
+**规则**：Skill 的 AI 协作模式（assist）**只生成提示词让用户复制粘贴给任意 AI**，不在 Skill 内部直接调 AI API。
+
+**原因**：
+- 密钥管理复杂度高（API key 存哪里、怎么轮换、怎么避免泄露）
+- 有成本（调 AI API 要花钱，免费额度有限）
+- 锁定单一 AI（调 OpenAI 就不能换 Claude，用户没有选择权）
+- 用户可能已有 ChatGPT Plus / Claude Pro，复制粘贴零成本
+
+**操作**：generate_ai_prompt.py 只输出文本，不 import openai/anthropic 等 SDK。
+
+**适用场景**：任何 Skill 的 AI 协作模式设计。
+
+---
+
+### Rule 8 · Python 字符串内避免中文引号嵌套
+
+**规则**：Python 字符串（尤其是双引号字符串）内部**不要直接嵌入中文引号""**，否则会导致 `SyntaxError: invalid syntax`（Python 把中文引号当成字符串结束符）。
+
+**原因**：
+- Python 字符串用 `"` 或 `'` 包裹，中文引号 `""` 在某些编码下会被解析器误判
+- 报错信息 `Is this intended to be part of the string?` 不直观
+
+**替代方案**：用中文书名号 `『』` 或 `「」` 代替，或用转义。
+
+**适用场景**：任何在 Python 字符串里需要表达"引用"语义的 Skill。

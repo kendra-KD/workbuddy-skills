@@ -3,9 +3,10 @@
 """
 Issue Report Formatter · 运维问题上报格式化器核心脚本
 
-两种工作模式：
+三种工作模式：
 1. --mode extract  : 从自然语言描述中抽取关键字段，生成结构化报告
 2. --mode format   : 把用户逐字段提供的输入格式化为标准报告
+3. --mode assist   : 格式化报告后，生成 AI 协作提示词+排查清单+诊断假设树（同步给 AI 辅助解决）
 
 输出：Markdown 报告（stdout）+ JSON 结构化数据（--json 参数指定文件路径）
 
@@ -13,6 +14,7 @@ Issue Report Formatter · 运维问题上报格式化器核心脚本
 - 抽取不到的字段标记 [待补充]，绝不臆造
 - 不执行任何命令、不调用任何 API、不修改任何配置
 - 敏感信息（IP/密码）默认保留，--mask 参数可脱敏
+- assist 模式只生成提示词，不直接调 AI API
 """
 
 import argparse
@@ -332,8 +334,8 @@ def main():
   python format_report.py --mode extract --no-monetization
 """
     )
-    parser.add_argument("--mode", choices=["extract", "format"], required=True,
-                        help="extract=从自然语言抽取，format=逐字段格式化")
+    parser.add_argument("--mode", choices=["extract", "format", "assist"], required=True,
+                        help="extract=从自然语言抽取，format=逐字段格式化，assist=格式化+生成AI协作提示词")
     parser.add_argument("--customer", help="[format 模式] 客户名")
     parser.add_argument("--env", help="[format 模式] 环境/节点")
     parser.add_argument("--error", help="[format 模式] 完整报错")
@@ -345,11 +347,11 @@ def main():
     args = parser.parse_args()
 
     # 收集字段
-    if args.mode == "extract":
-        # 从 stdin 读取自然语言
+    if args.mode == "extract" or args.mode == "assist":
+        # extract 和 assist 都从 stdin 读取自然语言
         text = sys.stdin.read().strip()
         if not text:
-            print("[错误] extract 模式需要从 stdin 输入自然语言描述", file=sys.stderr)
+            print("[错误] extract/assist 模式需要从 stdin 输入自然语言描述", file=sys.stderr)
             sys.exit(1)
         fields = extract_from_text(text)
     else:
@@ -380,6 +382,21 @@ def main():
 
     # 输出 Markdown 到 stdout
     print(md_report)
+
+    # assist 模式：额外输出 AI 协作产物
+    if args.mode == "assist":
+        try:
+            from generate_ai_prompt import generate_assist_output
+            print("\n" + generate_assist_output(fields, severity))
+        except ImportError:
+            # 独立运行 generate_ai_prompt.py 时走 subprocess
+            import subprocess
+            json_str = json.dumps(fields, ensure_ascii=False)
+            result = subprocess.run(
+                [sys.executable, "generate_ai_prompt.py", "--json-input", json_str, "--severity", severity],
+                capture_output=True, text=True, encoding="utf-8"
+            )
+            print("\n" + result.stdout)
 
     # 输出 JSON 到文件（如果指定）
     if args.json_path:
