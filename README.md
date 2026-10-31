@@ -29,9 +29,9 @@ monitor     report-    generator   runbook
 
 | Skill | 分类 | 说明 | 状态 |
 |-------|------|------|------|
-| [ssl-cert-monitor](./skills/ssl-cert-monitor/) | 运维技术 | SSL/TLS 证书到期批量巡检，按紧急度排序生成 Markdown 报告 + JSON 数据，附 4 平台续签指引 | ✅ v1.0 已发布 |
-| [issue-report-formatter](./skills/issue-report-formatter/) | 运维技术 | 运维问题上报格式化器，把零散报错描述+环境信息整理成标准化上报报告，自动分级紧急度，v1.1 新增 AI 协作三件套（提示词+排查清单+诊断假设树） | ✅ v1.1 待发布 |
-| [runbook-generator](./skills/runbook-generator/) | 运维技术 | 运维故障 Runbook 生成器，输入故障特征匹配 10 个预置实战 runbook（502/503/504/timeout/cert-expiry/pod-crash/minio-500/disk-full/oom），输出排查步骤+验证+回退+根因假设树 | ✅ v1.0 待发布 |
+| [ssl-cert-monitor](./skills/ssl-cert-monitor/) | 运维技术 | SSL/TLS 证书到期批量巡检，按紧急度排序生成 Markdown 报告 + JSON 数据，附 4 平台续签指引 | ✅ v1.1 已发布 |
+| [issue-report-formatter](./skills/issue-report-formatter/) | 运维技术 | 运维问题上报格式化器，把零散报错描述+环境信息整理成标准化上报报告，自动分级紧急度，v1.1 新增 AI 协作三件套（提示词+排查清单+诊断假设树） | ✅ v1.1 已发布 |
+| [runbook-generator](./skills/runbook-generator/) | 运维技术 | 运维故障 Runbook 生成器，输入故障特征匹配 10 个预置实战 runbook（502/503/504/timeout/cert-expiry/pod-crash/minio-500/disk-full/oom），输出排查步骤+验证+回退+根因假设树。SkillHub slug: ops-fault-runbook | ✅ v1.0 已发布 |
 
 ### 分类规划
 
