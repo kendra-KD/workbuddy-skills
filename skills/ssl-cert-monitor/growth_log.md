@@ -48,3 +48,37 @@
 ### 待观察（暂不升级为规则）
 - 超大批量（100+ 域名）性能未测——当前串行处理 + 10 秒超时，理论上 100 域名最坏 1000 秒。后续若有用户反馈慢，再考虑并发。
 - 未测证书链不完整时的 warning 标记是否准确——当前逻辑只是 try-except 检测，未做真实场景验证。
+
+---
+
+## #002 · 2026-10-31 · v1.1 体验优化（对齐后两个 Skill 格式）
+
+### 触发场景
+ssl-cert-monitor 是最早做的 Skill，SKILL.md 结构不如后做的 issue-report-formatter / ops-fault-runbook 友好——缺痛点描述、核心能力列表、不适用场景、调用示例命令，frontmatter 也缺 slug/displayName/version 三字段（SkillHub CLI 2026.8.5 强制要求）。用户要求做 v1.1 升级对齐。
+
+### 方案选择
+- **优化范围**：补 frontmatter 三字段 + 补痛点/核心能力/不适用场景 + 补调用示例（用户决策门确认，变现引导不加）
+- **对齐模板**：issue-report-formatter / ops-fault-runbook 的 SKILL.md 结构
+- **不动脚本**：check_certs.py / generate_report.py 不改，只改 SKILL.md
+
+### 最终效果
+- SKILL.md 从 89 行扩到 ~130 行，8 个文件 56KB
+- frontmatter 六要素齐全（name/slug/displayName/version/description/agent_created）
+- 结构对齐校验全 PASS（Overview/痛点/核心能力/适用场景/不适用场景/调用示例/约束/安全红线）
+- SkillHub dry-run + 正式发布成功，skillId=301180
+
+### 关键决策
+1. **变现引导不加**：用户明确只选前三项（frontmatter+痛点能力+调用示例），ssl-cert-monitor 保持纯工具定位，变现统一走公众号文章引流，不在 Skill 内硬植入
+2. **调用示例参数修正**：原 SKILL.md 写的 `python check_certs.py domains_template.csv` 是错的（位置参数），实际是 `--csv` flag，v1.1 修正为正确参数
+3. **description 精简**：从 322 字符精简到 ~280 字符（≤300 阈值），删掉重复的触发短语
+
+### 踩坑记录
+| # | 问题 | 根因 | 修复 | 耗时 |
+|---|------|------|------|------|
+| 1 | zip 混入临时文件 | 实测时产生的 _validate_v11.py/check_result.json/cert_report.md 被打进包 | 打包脚本加 `f.startswith('_')` 过滤 + 手动清理 | 低 |
+| 2 | bash heredoc 内 Python 正则引号被转义 | `description:\s*"(.*?)"` 在 bash 双引号内被改写 | 改用独立 .py 验证脚本 | 低 |
+
+### 可复用经验
+1. **打包前必须检查 zip 内容清单**：os.walk 会把目录内所有文件打进包，实测产生的临时文件必须先清理或用过滤规则排除。已补强打包脚本（过滤 `_` 开头 + `.pyc` + `__pycache__`）。
+2. **bash 内联 Python 少用复杂正则**：含引号的正则在 bash heredoc 里容易转义出错，验证逻辑写成独立 .py 文件更可靠。
+
