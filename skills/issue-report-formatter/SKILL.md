@@ -1,5 +1,8 @@
 ---
 name: issue-report-formatter
+slug: issue-report-formatter
+displayName: 运维问题上报格式化器
+version: 1.1.0
 description: "运维问题上报格式化器。把零散的报错描述、环境信息、已试操作整理成标准化的运维问题上报报告。触发短语：'问题上报'、'故障上报'、'报障'、'上报问题'、'整理报错'、'格式化故障报告'、'issue report'、'bug report format'、'incident report'。面向运维工程师、技术支持、SRE、私有化交付等场景。"
 agent_created: true
 ---
