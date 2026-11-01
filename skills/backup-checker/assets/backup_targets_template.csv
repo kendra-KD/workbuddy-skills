@@ -1,0 +1,30 @@
+﻿# Backup Targets Inventory Template
+# 备份目标巡检清单模板
+#
+# 字段说明：
+#   name                      : 目标名称（必填，唯一标识，用于报告展示）
+#   type                      : 目标类型（必填，可选值：local-file / minio-s3 / database / k8s-resource）
+#   path                      : 备份路径（必填）
+#                               - local-file/database : 文件绝对路径，如 /data/backups/db1.sql.gz
+#                               - minio-s3            : s3://bucket/prefix/
+#                               - k8s-resource        : resource/name，如 configmap/core-config
+#   host                      : 远程主机（可选，默认 localhost；local-file/database 远程时填 SSH host）
+#                               - minio-s3            : 可填自定义 endpoint（配合 BACKUP_CHECKER_S3_ENDPOINT）
+#   namespace                 : K8s 命名空间（仅 k8s-resource 用）
+#   db_type                   : 数据库类型（仅 database 用，可选 mysql/postgres/redis）
+#   expected_min_size_mb      : 最小期望大小 MB（可选，默认 0=不检查；小于此值视为异常）
+#   expected_max_age_hours    : 最大期望年龄小时（可选，默认 0=不检查；超过此值视为过期）
+#   expected_min_objects      : 最小对象数量（仅 minio-s3 用，默认 1）
+#
+# 安全红线：此文件只填路径和阈值，绝不填密码/密钥/凭据。
+# 凭据通过 mc alias / aws configure / SSH 免密 / kubeconfig 管理。
+#
+# 行以 # 开头为注释，不被解析。
+
+name,type,path,host,namespace,db_type,expected_min_size_mb,expected_max_age_hours,expected_min_objects
+db1-mysql-dump,local-file,/data/backups/db1.sql.gz,db1.example.com,,mysql,10,24,
+pg-main-dump,local-file,/var/backups/pg/main.dump,pg.example.com,,postgres,5,24,
+redis-cache-rdb,local-file,/var/lib/redis/dump.rdb,redis.example.com,,redis,1,24,
+nginx-conf-bk,local-file,/data/backups/nginx-conf.tar.gz,web1.example.com,,,0.001,168,
+daily-backup-bucket,minio-s3,s3://daily-backups/,,,,,24,1
+core-configmap,k8s-resource,configmap/core-config,,enableai,,,0,0,
