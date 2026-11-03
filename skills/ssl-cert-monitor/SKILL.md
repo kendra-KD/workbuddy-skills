@@ -2,7 +2,7 @@
 name: ssl-cert-monitor
 slug: ssl-cert-monitor
 displayName: SSL证书到期巡检
-version: 1.1.0
+version: 1.1.1
 description: "SSL/TLS 证书到期批量巡检工具。检查 HTTPS 域名证书剩余有效期，按紧急度（≤7天紧急、≤30天警告、已过期）排序生成 Markdown 报告与 JSON 数据，附 Let's Encrypt/阿里云/腾讯云/华为云续签指引。触发短语：'检查证书到期'、'SSL 巡检'、'证书快过期'、'批量检查证书'、'cert expiry monitor'、'check cert expiry'、'ssl certificate monitor'。面向运维、SRE、技术支持、私有化交付。仅检查与报告，不自动续签。纯 Python 标准库，零依赖。"
 agent_created: true
 ---
@@ -44,6 +44,34 @@ agent_created: true
 用户说以下任一短语时触发：
 - 中文：检查证书到期 / SSL 巡检 / 证书快过期 / 批量检查证书 / 证书到期检查
 - 英文：cert expiry monitor / check cert expiry / ssl certificate monitor / tls certificate check
+
+### 对话使用示例（用户怎么用）
+
+**你不需要去终端敲命令。** 装了这个 Skill 后，直接在对话里用自然语言描述需求，WorkBuddy 会自动识别触发短语并加载本 Skill。
+
+#### 场景 1 · 定期巡检（最常用）
+
+> **你说**：帮我做一下证书巡检 / 检查证书到期情况
+
+如果你有 CSV 域名清单（放在 `assets/domains_template.csv`），批量检查所有域名；如果没有，你直接在对话里列出域名（如 `reredata.com`、`blog.example.com:8443`），Skill 解析后检查，输出按紧急度排序的报告。
+
+#### 场景 2 · 临时查单个域名
+
+> **你说**：检查 reredata.com 的证书还有多久过期
+
+单个域名检查，立即出结果（紧急/警告/正常/已过期）。
+
+#### 场景 3 · 接手新环境盘点
+
+> **你说**：盘点一下这个环境的证书情况 / 证书健康检查
+
+批量扫所有域名，按紧急度排序出清单，接手时一目了然。
+
+#### 场景 4 · 证书快过期了怎么办
+
+> **你说**：证书快过期了怎么处理
+
+检查到紧急/警告级别后，Skill 会根据证书颁发者匹配对应平台的续签指引（Let's Encrypt / 阿里云 / 腾讯云 / 华为云），给出操作要点，**不自动执行续签**。
 
 ### Step 1 · 获取域名清单
 

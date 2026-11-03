@@ -2,7 +2,7 @@
 name: ops-fault-runbook
 slug: ops-fault-runbook
 displayName: 运维故障 Runbook 生成器
-version: 1.1.0
+version: 1.1.1
 description: "运维故障 Runbook 生成器。输入故障特征（如 502/503/504/timeout/DNS解析失败/数据库连接失败/证书过期/pod crashloopbackoff/pod pending/MinIO S3 500/磁盘满/OOM/Docker容器无法启动/Nginx配置错误），自动匹配预置实战 runbook，输出结构化排查步骤+验证命令+回退方案+根因假设。未匹配时推荐最接近的 runbook 并给出通用排查框架。触发短语：'故障排查'、'runbook'、'排查步骤'、'怎么排查'、'故障处理流程'、'troubleshoot runbook'、'incident playbook'、'生成排查手册'。面向运维工程师、SRE、技术支持、私有化交付。纯规则引擎，不调 AI API，零成本零延迟。本 Skill 是运维全生命周期四件套之一（预防→发现→上报→解决）。"
 agent_created: true
 ---
@@ -42,6 +42,55 @@ agent_created: true
 - **ops-fault-runbook**（解决）→ 匹配排查步骤引导解决
 
 四件套覆盖运维全生命周期：预防→发现→上报→解决。
+
+---
+
+## 对话使用示例（用户怎么用）
+
+**你不需要去终端敲命令。** 装了这个 Skill 后，直接在对话里用自然语言描述故障，WorkBuddy 会自动识别触发短语并加载本 Skill。
+
+### 场景 1 · 生产故障发生时（最常用）
+
+你在工作时碰到问题，直接在对话里描述现象：
+
+> **你说**：生产环境有个 pod 一直 crashloopbackoff，帮我看下怎么排查
+
+WorkBuddy 识别到「crashloopbackoff」「排查」触发本 Skill，内部匹配到 `pod-crashloopbackoff` runbook，直接输出：
+- 故障概述 + 根因假设树（按概率排序）
+- 6 步排查步骤（每步含可直接复制的命令 + 预期输出 + 判断条件）
+- 验证方法 + 回退方案
+
+你照着步骤一步步执行，每步的命令可以直接复制到终端跑。
+
+### 场景 2 · 只给故障码或关键词
+
+> **你说**：502
+
+匹配到 `http-502` runbook，输出完整的 502 排查流程。
+
+> **你说**：证书过期了怎么处理
+
+匹配到 `cert-expiry` runbook，输出证书更新 + K8s secret 替换 + CDN 同步的完整步骤。
+
+### 场景 3 · 不确定是哪种故障
+
+> **你说**：连不上数据库
+
+匹配到 `db-connection-failure` runbook。如果你的描述没精确命中任何预置 runbook，会输出「最接近的 3 个 runbook 推荐 + 通用排查框架」，你再选一个或换关键词。
+
+### 场景 4 · 先看看有哪些故障能查
+
+> **你说**：runbook 列表 / 都有哪些排查手册
+
+输出全部 15 个内置 runbook 的清单（ID + 故障类型 + 关键词），你看到接近的再用 `--detail <id>` 或直接描述现象触发。
+
+### 场景 5 · 新人学习常见故障排查流程
+
+> **你说**：给我讲讲 504 怎么排查 / pod pending 一般是什么原因
+
+匹配到对应 runbook，新人可以照着根因假设树和排查步骤学习标准流程，不用等真的出故障才学。
+
+---
 
 ## 工作流程
 

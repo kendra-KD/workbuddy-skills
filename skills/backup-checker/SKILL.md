@@ -2,7 +2,7 @@
 name: ops-backup-checker
 slug: ops-backup-checker
 displayName: 备份健康巡检器
-version: 1.0.0
+version: 1.0.1
 description: "备份健康巡检工具。批量检查服务器本地备份文件、MinIO/S3 对象存储备份、数据库备份状态（MySQL dump/PG dump/Redis RDB）、K8s 资源备份（ConfigMap/Secret/PV），验证文件存在/大小/时间戳是否符合预期，按健康度（缺失/过期/异常小/正常）排序生成 Markdown 报告与 JSON 数据。内置 5 类常见备份检查模板。触发短语：'备份检查'、'备份巡检'、'备份健康'、'验证备份'、'backup health'、'backup checker'、'备份是否正常'。面向运维、SRE、DBA、私有化交付。只读不写，不执行备份，不存储备份内容。纯 Python 标准库 + mc/aws-cli/ssh，零第三方依赖。"
 agent_created: true
 ---
@@ -49,6 +49,42 @@ agent_created: true
 | 解决 | ops-fault-runbook | 匹配排查步骤引导解决 |
 
 四件套覆盖运维全生命周期：**预防→发现→上报→解决**。
+
+---
+
+## 对话使用示例（用户怎么用）
+
+**你不需要去终端敲命令。** 装了这个 Skill 后，直接在对话里用自然语言描述需求，WorkBuddy 会自动识别触发短语并加载本 Skill。
+
+### 场景 1 · 周一早巡检（最常用）
+
+周一早上想确认周末备份有没有正常跑：
+
+> **你说**：帮我做一下备份巡检 / 检查备份是否正常
+
+WorkBuddy 识别到「备份巡检」「备份是否正常」触发本 Skill。如果你有 CSV 巡检清单（放在 `assets/backup_targets_template.csv`），它会批量检查所有目标；如果没有，它会问你要检查哪些备份目标（如"db1 的 MySQL dump、minio 的 bucket backup"），然后输出按健康度排序的巡检报告。
+
+### 场景 2 · 故障复盘后验证
+
+刚处理完一次故障，想确认这个服务相关的备份是不是真的可用：
+
+> **你说**：验证一下 db1 的备份能不能用 / 检查 minio bucket backup 健康度
+
+只检查你指定的目标，30 秒出报告。
+
+### 场景 3 · 接手新环境盘点
+
+接手浙江白马这种私有化交付环境，第一件事摸清备份现状：
+
+> **你说**：盘点一下这个环境的备份情况 / 备份健康检查
+
+如果你提前准备了 CSV 清单（列出所有备份目标），直接批量扫；没有清单就逐个描述目标，Skill 解析后检查。
+
+### 场景 4 · 只查单个目标（临时排查）
+
+> **你说**：检查 db1 的 MySQL dump，路径 /data/backups/db1.sql.gz，最少 10MB，24 小时内
+
+单个目标检查，立即出结果（正常/过期/异常/缺失）。
 
 ---
 
