@@ -80,3 +80,42 @@
 **操作**：match_runbook 返回 None 时，调用 generate_no_match_markdown 输出通用框架。
 
 **适用场景**：runbook 匹配失败时的降级处理。
+
+---
+
+### Rule 6 · 匹配评分算法要分级（从 v1.1 提炼）
+
+**规则**：关键词匹配类 Skill 的评分算法必须分三级：
+- **精确匹配**（关键词 == 查询）：+50（最高，用户说的就是这个词）
+- **查询包含关键词**（关键词 in 查询）：+len(kw)*2（关键词越长越具体）
+- **关键词包含查询**（查询 in 关键词）：+len(query)（弱匹配，可能是泛化词被长关键词包含）
+
+**原因**：不分级的旧算法（`kw in query` 和 `query in kw` 都加分）会导致"短查询被长关键词误匹配"。例如 `connection refused` 查询会被 `connection refused mysql` 这个长关键词的 `query in kw` 规则加分，导致 db-connection-failure 得分超过 connection-refused。
+
+**操作**：`_score_runbook` 函数实现三级评分，精确匹配权重远高于包含匹配。
+
+**适用场景**：任何基于关键词匹配的 Skill。
+
+---
+
+### Rule 7 · title 参与弱匹配提升自然语言召回率（从 v1.1 提炼）
+
+**规则**：runbook/模板类 Skill 的匹配引擎，除了关键词匹配外，应让 title 也参与弱匹配——查询中的单词（≥3 字符）如果出现在 title 里，加 len(word) 的弱分。
+
+**原因**：用户不会精确输入关键词，会输入描述性语言（如 "gateway error 500"）。只靠关键词匹配会漏掉这类查询。title 含故障类型名称（"502 Bad Gateway"），单词命中 title 能低成本提升召回率。
+
+**操作**：`_score_runbook` 函数末尾加 title 匹配块，权重低于关键词（len(word) vs len(kw)*2）。
+
+**适用场景**：任何含 title 字段的模板匹配类 Skill。
+
+---
+
+### Rule 8 · 未匹配时推荐最接近的 top-N（从 v1.1 提炼）
+
+**规则**：匹配类 Skill 在未匹配到精确结果时，除了输出通用框架外，应输出"最接近的 N 个"推荐（按匹配分数降序取 top-3），每个推荐含 title + 关键词 + 概述摘要 + 查看命令。
+
+**原因**：用户输入可能差一点就匹配上了（如 "证书" 匹配不到 "证书过期"）。只给通用框架让用户从头来，推荐最接近的能降低用户重新输入的成本。
+
+**操作**：新增 `match_runbooks_topn(query, n=3)` 函数，`generate_no_match_markdown` 在通用框架前加推荐块。
+
+**适用场景**：任何匹配失败有降级处理的 Skill。

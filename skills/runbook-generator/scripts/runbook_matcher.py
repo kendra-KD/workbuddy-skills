@@ -18,7 +18,7 @@ import sys
 
 # 同目录导入 runbook_lib
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from runbook_lib import RUNBOOKS, list_runbooks, get_runbook, match_runbook
+from runbook_lib import RUNBOOKS, list_runbooks, get_runbook, match_runbook, match_runbooks_topn
 
 
 def generate_markdown(rb):
@@ -66,13 +66,24 @@ def generate_json(rb):
 
 
 def generate_no_match_markdown(query):
-    """未匹配到 runbook 时的通用排查框架。"""
+    """未匹配到 runbook 时的通用排查框架 + 最接近的推荐。"""
     lines = []
     lines.append(f"# 未找到匹配的 Runbook\n")
     lines.append(f"**输入**: `{query}`\n")
     lines.append("---\n")
+    # 推荐最接近的 N 个
+    topn = match_runbooks_topn(query, n=3)
+    if topn:
+        lines.append("## 最接近的 Runbook 推荐\n")
+        lines.append("虽然没有精确匹配，但以下 runbook 与你的描述最相关，可以先看看：\n")
+        for rb, score in topn:
+            lines.append(f"### {rb['title']}（`{rb['id']}`，匹配度 {score}）")
+            lines.append(f"- 关键词: {', '.join(rb['keywords'])}")
+            lines.append(f"- 概述: {rb['summary'][:80]}...")
+            lines.append(f"- 查看: `python runbook_matcher.py --detail {rb['id']}`\n")
+        lines.append("---\n")
     lines.append("## 通用排查框架\n")
-    lines.append("没有找到精确匹配的 runbook，以下通用框架可帮助结构化排查：\n")
+    lines.append("以下通用框架可帮助结构化排查：\n")
     lines.append("### Step 1 · 收集信息\n")
     lines.append("- 完整报错信息（截图或文本）\n")
     lines.append("- 发生时间、影响范围\n")
@@ -86,8 +97,8 @@ def generate_no_match_markdown(query):
     lines.append("### Step 3 · 上报问题\n")
     lines.append("如需上报给团队，使用 `issue-report-formatter` Skill 把信息整理成标准报告。\n")
     lines.append("---\n")
-    lines.append("## 可用 Runbook 列表\n")
-    lines.append("以下是当前内置的 runbook，检查是否有接近的：\n")
+    lines.append("## 全部可用 Runbook 列表\n")
+    lines.append("以下是当前内置的全部 runbook：\n")
     for rb in list_runbooks():
         lines.append(f"- `{rb['id']}` — {rb['title']}（关键词: {', '.join(rb['keywords'])}）")
     lines.append("\n用 `python runbook_matcher.py --detail <id>` 查看完整内容。\n")

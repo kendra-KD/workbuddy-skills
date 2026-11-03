@@ -2,8 +2,8 @@
 name: ops-fault-runbook
 slug: ops-fault-runbook
 displayName: 运维故障 Runbook 生成器
-version: 1.0.0
-description: "运维故障 Runbook 生成器。输入故障特征（如 502/503/timeout/证书过期/pod crashloopbackoff/MinIO S3 500/磁盘满/OOM），自动匹配预置实战 runbook，输出结构化排查步骤+验证命令+回退方案+根因假设。触发短语：'故障排查'、'runbook'、'排查步骤'、'怎么排查'、'故障处理流程'、'troubleshoot runbook'、'incident playbook'、'生成排查手册'。面向运维工程师、SRE、技术支持、私有化交付等场景。纯规则引擎，不调 AI API，零成本零延迟。"
+version: 1.1.0
+description: "运维故障 Runbook 生成器。输入故障特征（如 502/503/504/timeout/DNS解析失败/数据库连接失败/证书过期/pod crashloopbackoff/pod pending/MinIO S3 500/磁盘满/OOM/Docker容器无法启动/Nginx配置错误），自动匹配预置实战 runbook，输出结构化排查步骤+验证命令+回退方案+根因假设。未匹配时推荐最接近的 runbook 并给出通用排查框架。触发短语：'故障排查'、'runbook'、'排查步骤'、'怎么排查'、'故障处理流程'、'troubleshoot runbook'、'incident playbook'、'生成排查手册'。面向运维工程师、SRE、技术支持、私有化交付。纯规则引擎，不调 AI API，零成本零延迟。本 Skill 是运维全生命周期四件套之一（预防→发现→上报→解决）。"
 agent_created: true
 ---
 
@@ -35,12 +35,13 @@ agent_created: true
 
 ## 产品矩阵定位
 
-这是运维工具链的第三环：
-- **ssl-cert-monitor**（发现问题）→ 批量检查证书到期
-- **issue-report-formatter**（上报问题）→ 把故障描述整理成标准上报报告
-- **runbook-generator**（解决问题）→ 匹配排查步骤引导解决
+这是运维全生命周期四件套之一，覆盖"解决"环节：
+- **ops-backup-checker**（预防）→ 备份健康巡检，防止"以为备份了其实没备"
+- **ssl-cert-monitor**（发现）→ 批量检查证书到期
+- **issue-report-formatter**（上报）→ 把故障描述整理成标准上报报告
+- **ops-fault-runbook**（解决）→ 匹配排查步骤引导解决
 
-三件套覆盖了运维故障的完整生命周期。
+四件套覆盖运维全生命周期：预防→发现→上报→解决。
 
 ## 工作流程
 
@@ -94,6 +95,11 @@ python scripts/runbook_matcher.py --detail http-502
 | `minio-s3-500` | MinIO/S3 返回 500 | minio 500、s3 error、presigned url |
 | `disk-full` | 磁盘空间满 | disk full、no space、磁盘满 |
 | `oom-killed` | OOM Killed | oom、out of memory、内存溢出 |
+| `dns-resolution-failure` | DNS 解析失败 | dns、解析失败、nslookup、coredns |
+| `db-connection-failure` | 数据库连接失败 | 数据库连接失败、db connection、too many connections |
+| `pod-pending` | K8s Pod Pending | pod pending、调度失败、unschedulable |
+| `docker-container-start-failure` | Docker 容器无法启动 | docker 启动失败、容器启动即退出、exited immediately |
+| `nginx-config-error` | Nginx 配置语法错误 | nginx -t、syntax error、nginx reload、nginx 配置 |
 
 ## 输出格式
 

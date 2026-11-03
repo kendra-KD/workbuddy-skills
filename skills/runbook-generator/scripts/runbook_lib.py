@@ -520,6 +520,276 @@ RUNBOOKS = [
         "verify": "kubectl top pod 显示内存使用稳定在 limit 的 70% 以下，pod 不再 OOMKilled。",
         "rollback": "如果调大了 limit 但节点资源不足导致 pod 无法调度：\n# 回滚到原 limit\nkubectl set resources deployment/<deployment名> -n <namespace> --limits=memory=<原值>\n# 考虑扩容节点或优化应用内存使用",
     },
+    # ─────────────── 11. DNS 解析失败 ───────────────
+    {
+        "id": "dns-resolution-failure",
+        "title": "DNS 解析失败排查",
+        "keywords": ["dns", "解析失败", "name resolution", "解析不到", "nslookup", "dig", "unknown host", "域名解析", "resolve", "coredns"],
+        "summary": "域名无法解析或解析到错误 IP，导致服务访问失败。可能是 DNS 服务故障、解析配置错误、域名未注册或过期、CoreDNS 异常。与 timeout 的区别：timeout 是网络层超时，DNS 失败是连 IP 都没拿到。",
+        "root_causes": [
+            {"cause": "DNS 服务器不可达或故障", "verify": "nslookup 测试已知域名", "probability": "高"},
+            {"cause": "域名未注册/已过期/DNS 记录未生效", "verify": "whois 查域名状态 + dig 查解析记录", "probability": "高"},
+            {"cause": "K8s CoreDNS 异常（ConfigMap 错误/pod 重启/上游 forward 失败）", "verify": "kubectl get pod -n kube-system | grep coredns", "probability": "中"},
+            {"cause": "本地 /etc/resolv.conf 配置错误", "verify": "cat /etc/resolv.conf", "probability": "中"},
+            {"cause": "DNS 缓存了错误结果（TTL 未过期）", "verify": "dig +trace 看权威解析", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "确认是否 DNS 问题——解析失败还是网络不通",
+                "command": "# 解析测试\nnslookup <域名>\n# 或\ndig <域名> +short\n# 同时测试已知正常域名\nnslookup baidu.com",
+                "expected": "返回 IP 地址；如果所有域名都失败，是 DNS 服务问题；如果只目标域名失败，是该域名问题",
+                "judgment": "所有域名都解析失败→DNS 服务/配置问题；只目标域名失败→该域名的 DNS 记录问题",
+            },
+            {
+                "action": "检查本地 DNS 配置",
+                "command": "# 查看 DNS 服务器配置\ncat /etc/resolv.conf\n# K8s pod 内 DNS 配置\nkubectl exec <pod名> -n <namespace> -- cat /etc/resolv.conf",
+                "expected": "nameserver 指向可用的 DNS 服务器（如 8.8.8.8 / 114.114.114.114 / 集群 CoreDNS）",
+                "judgment": "如果 nameserver 配置错误或为空，修正配置；K8s 中应为 kube-dns 或 CoreDNS 的 ClusterIP",
+            },
+            {
+                "action": "检查域名注册和 DNS 记录状态",
+                "command": "# 查域名注册状态（是否过期）\nwhois <域名> | grep -i 'expiry\\|status\\|registrar'\n# 查 DNS 记录\ndig <域名> NS +short\ndig <域名> A +trace",
+                "expected": "域名未过期，NS 记录指向正确的 DNS 服务商，A 记录存在",
+                "judgment": "域名过期→续费；NS 记录错误→在域名注册商处修改 DNS 服务器；A 记录缺失→在 DNS 服务商（如阿里云云解析）添加记录",
+            },
+            {
+                "action": "如果是 K8s 环境，检查 CoreDNS",
+                "command": "# CoreDNS pod 状态\nkubectl get pod -n kube-system | grep coredns\n# CoreDNS 日志\nkubectl logs -n kube-system <coredns-pod> --tail=50 | grep -i 'error\\|fail'\n# CoreDNS ConfigMap\nkubectl get configmap coredns -n kube-system -o yaml | grep -A20 '.:53'",
+                "expected": "CoreDNS pod Running 且 READY 1/1，日志无错误，ConfigMap 配置正确",
+                "judgment": "CoreDNS pod 异常→重启 pod；ConfigMap 的 forward 指向错误的上游 DNS→修正 forward 配置；CoreDNS 重启循环→检查 ConfigMap 语法",
+            },
+            {
+                "action": "检查 DNS 服务商控制台（如阿里云云解析）",
+                "command": "# 登录阿里云控制台 → 云解析 DNS → 域名解析\n# 检查：\n# 1. 域名解析是否暂停\n# 2. A/CNAME 记录是否正确\n# 3. 解析线路是否正常\n# 4. TTL 设置是否合理",
+                "expected": "解析记录存在且值正确，解析状态为正常",
+                "judgment": "记录缺失或错误→添加/修改记录；解析被暂停→恢复解析",
+            },
+            {
+                "action": "清除 DNS 缓存重试",
+                "command": "# 本机 DNS 缓存\n# Linux 通常无本地缓存，重启 nscd 即可（如安装）\nsystemctl restart nscd 2>/dev/null\n# macOS\ndscacheutil -flushcache\n# Windows\nipconfig /flushdns\n# K8s pod 重启清除缓存\nkubectl delete pod <pod名> -n <namespace>",
+                "expected": "缓存清除后重新解析成功",
+                "judgment": "如果清缓存后正常，说明是 TTL 内缓存了错误结果，等待 TTL 过期或缩短 TTL",
+            },
+        ],
+        "verify": "nslookup <域名> 返回正确 IP，且 curl http://<域名> 正常连接。",
+        "rollback": "DNS 修改通常无副作用。如果修改了 CoreDNS ConfigMap 导致解析全挂：\n# 回滚 ConfigMap\nkubectl edit configmap coredns -n kube-system  # 改回原配置\n# 重启 CoreDNS\nkubectl rollout restart deployment coredns -n kube-system",
+    },
+    # ─────────────── 12. 数据库连接失败 ───────────────
+    {
+        "id": "db-connection-failure",
+        "title": "数据库连接失败排查",
+        "keywords": ["数据库连接失败", "db connection", "connection refused mysql", "connection refused postgres", "连不上数据库", "database connection", "access denied", "too many connections", "mysql 连接", "pg 连接", "数据库", "mysql 连接失败", "postgres 连接失败", "mysql 连不上", "pg 连不上", "数据库连不上", "mysql connection", "postgres connection", "redis connection", "数据库 connection"],
+        "summary": "应用无法连接数据库，可能是数据库服务未启动、网络不通、凭据错误、连接池耗尽、权限问题。常见于 MySQL/PostgreSQL/Redis。",
+        "root_causes": [
+            {"cause": "数据库服务未启动或崩溃", "verify": "检查数据库进程/pod 状态", "probability": "高"},
+            {"cause": "网络不通（防火墙/安全组/网络策略拦截数据库端口）", "verify": "telnet 数据库端口", "probability": "高"},
+            {"cause": "凭据错误（用户名/密码/数据库名不对）", "verify": "命令行用相同凭据连接测试", "probability": "高"},
+            {"cause": "连接池耗尽（max_connections 达上限）", "verify": "SHOW PROCESSLIST / 查连接数", "probability": "中"},
+            {"cause": "数据库只允许特定 IP 连接（bind-address / pg_hba.conf）", "verify": "检查数据库监听和访问控制配置", "probability": "中"},
+        ],
+        "steps": [
+            {
+                "action": "确认数据库服务是否存活",
+                "command": "# K8s\nkubectl get pod -n <namespace> | grep -iE 'mysql|postgres|redis'\n# 非 K8s\nps aux | grep -iE 'mysqld|postgres|redis-server'\n# 检查端口监听\nss -tlnp | grep -E '3306|5432|6379'",
+                "expected": "pod Running 且 READY 正常；进程存在；端口在监听",
+                "judgment": "如果服务未运行，先启动服务；K8s 中 pod 异常用 CrashLoopBackOff runbook 排查",
+            },
+            {
+                "action": "从应用所在机器测试数据库端口连通性",
+                "command": "# MySQL\ntelnet <数据库IP> 3306\n# 或\nnc -zv <数据库IP> 3306 -w 5\n# PostgreSQL\ntelnet <数据库IP> 5432\n# Redis\ntelnet <数据库IP> 6379",
+                "expected": "Connected / succeeded",
+                "judgment": "如果不通，排查网络/安全组/数据库监听地址；如果通但应用连不上，排查凭据或权限",
+            },
+            {
+                "action": "用命令行客户端相同凭据连接测试",
+                "command": "# MySQL\nmysql -h <数据库IP> -u <用户名> -p<密码> -P 3306 <数据库名>\n# PostgreSQL\nPGPASSWORD=<密码> psql -h <数据库IP> -U <用户名> -p 5432 -d <数据库名>\n# Redis\nredis-cli -h <数据库IP> -a <密码> -p 6379",
+                "expected": "成功进入数据库命令行",
+                "judgment": "如果命令行也连不上，是数据库端配置/网络问题；如果命令行能连但应用连不上，是应用配置（连接字符串/连接池）问题",
+            },
+            {
+                "action": "检查数据库连接数和连接池状态",
+                "command": "# MySQL\nSHOW PROCESSLIST;\nSHOW VARIABLES LIKE 'max_connections';\nSHOW STATUS LIKE 'Threads_connected';\n# PostgreSQL\nSELECT count(*) FROM pg_stat_activity;\nSHOW max_connections;\n# Redis\nINFO clients",
+                "expected": "活跃连接数远低于 max_connections",
+                "judgment": "如果连接数接近上限，排查连接泄漏（应用未关闭连接）或调大 max_connections",
+            },
+            {
+                "action": "检查数据库访问控制和监听配置",
+                "command": "# MySQL bind-address\ngrep 'bind-address' /etc/mysql/my.cnf /etc/mysql/mysql.conf.d/*.cnf 2>/dev/null\n# PostgreSQL pg_hba.conf\ngrep -v '^#' /etc/postgresql/*/main/pg_hba.conf 2>/dev/null | grep -v '^$'\n# PostgreSQL listen_addresses\ngrep 'listen_addresses' /etc/postgresql/*/main/postgresql.conf 2>/dev/null",
+                "expected": "MySQL bind-address 为 0.0.0.0 或包含应用 IP；PostgreSQL listen_addresses 为 '*' 或包含应用 IP；pg_hba.conf 允许应用 IP 连接",
+                "judgment": "如果只监听 127.0.0.1，外部无法连接，需改为 0.0.0.0（MySQL）或 '*'（PG）；如果 pg_hba.conf 未放行应用 IP，添加规则",
+            },
+            {
+                "action": "检查应用侧数据库配置",
+                "command": "# 查看应用配置文件中的数据库连接配置\n# Spring Boot\ngrep -A5 'datasource\\|spring.datasource' application.yml application.properties 2>/dev/null\n# K8s ConfigMap/Secret\nkubectl get configmap <configmap名> -n <namespace> -o yaml | grep -iA2 'db\\|database\\|mysql\\|postgres'\n# 检查连接池配置（如 HikariCP）\ngrep -i 'maximum-pool-size\\|connection-timeout' application.yml 2>/dev/null",
+                "expected": "连接字符串、用户名、密码、端口、数据库名与数据库实际配置一致",
+                "judgment": "配置不一致→修正；连接池太小→调大；连接超时太短→调大",
+            },
+        ],
+        "verify": "应用日志显示数据库连接成功，业务接口正常返回数据。",
+        "rollback": "如果修改了数据库配置导致更严重：\n# MySQL 恢复 bind-address\nsed -i 's/bind-address.*/bind-address = 127.0.0.1/' /etc/mysql/my.cnf && systemctl restart mysql\n# PostgreSQL 恢复 pg_hba.conf（从备份）\ncp /etc/postgresql/*/main/pg_hba.conf.bak /etc/postgresql/*/main/pg_hba.conf && systemctl restart postgresql",
+    },
+    # ─────────────── 13. K8s Pod Pending ───────────────
+    {
+        "id": "pod-pending",
+        "title": "K8s Pod Pending 排查",
+        "keywords": ["pod pending", "pending", "调度失败", "unschedulable", "pod 卡住", "scheduler", "node 资源不足", "pod pending 状态"],
+        "summary": "Pod 一直处于 Pending 状态无法调度到节点。通常是节点资源不足、节点污点未容忍、PVC 绑定失败、节点 NotReady。",
+        "root_causes": [
+            {"cause": "节点 CPU/内存资源不足，无法满足 pod requests", "verify": "kubectl describe pod 看 Events", "probability": "高"},
+            {"cause": "节点有污点（taint）且 pod 未配置 toleration", "verify": "kubectl get nodes -o custom-columns 查 taints", "probability": "高"},
+            {"cause": "PVC 绑定失败（StorageClass 不存在/容量不足/无可用 PV）", "verify": "kubectl get pvc 查状态", "probability": "中"},
+            {"cause": "节点 NotReady，调度器跳过该节点", "verify": "kubectl get nodes 查状态", "probability": "中"},
+            {"cause": "nodeSelector/nodeAffinity 标签不匹配任何节点", "verify": "检查 pod nodeSelector 和节点 labels", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "查看 pod 状态和 Pending 原因",
+                "command": "kubectl get pod <pod名> -n <namespace>\n# 关键：describe 看 Events\nkubectl describe pod <pod名> -n <namespace> | tail -20",
+                "expected": "Events 显示具体的调度失败原因（如 FailedScheduling、0/3 nodes are available）",
+                "judgment": "根据 Events 的 message 定位：资源不足→扩容或调小 requests；taint→加 toleration；PVC→排查存储",
+            },
+            {
+                "action": "检查节点资源水位",
+                "command": "# 节点资源使用（需 metrics-server）\nkubectl top nodes\n# 节点资源分配情况\nkubectl describe nodes | grep -A5 'Allocated\\|Capacity\\|Requests\\|Limits'",
+                "expected": "各节点 CPU/内存分配未到 100%",
+                "judgment": "如果所有节点资源都已分配满，需要扩容节点或减小 pod requests",
+            },
+            {
+                "action": "检查节点污点和 pod toleration",
+                "command": "# 查看节点污点\nkubectl get nodes -o custom-columns='NAME:.metadata.name,TAINTS:.spec.taints'\n# 查看 pod 是否配置了 toleration\nkubectl get pod <pod名> -n <namespace> -o yaml | grep -A5 tolerations",
+                "expected": "如果节点有污点（如 node.kubernetes.io/not-ready），pod 需配 toleration 才能调度",
+                "judgment": "节点有污点但 pod 无 toleration→给 pod 加 toleration 或移除节点污点",
+            },
+            {
+                "action": "检查 PVC 状态（如果 pod 挂载了持久卷）",
+                "command": "kubectl get pvc -n <namespace>\n# 查看 PVC 事件\nkubectl describe pvc <pvc名> -n <namespace> | tail -10\n# 检查 StorageClass\nkubectl get storageclass",
+                "expected": "PVC 状态为 Bound",
+                "judgment": "PVC Pending→StorageClass 不存在或无可用 PV；PVC 绑定失败→检查存储后端（如云盘配额、NFS 服务）",
+            },
+            {
+                "action": "检查节点是否 NotReady",
+                "command": "kubectl get nodes -o wide",
+                "expected": "所有节点 Ready",
+                "judgment": "如果节点 NotReady，排查节点 kubelet/网络/容器运行时；NotReady 节点不会被调度 pod",
+            },
+            {
+                "action": "检查 nodeSelector/nodeAffinity 标签匹配",
+                "command": "# pod 的 nodeSelector\nkubectl get pod <pod名> -n <namespace> -o yaml | grep -A5 nodeSelector\n# 节点 labels\nkubectl get nodes --show-labels",
+                "expected": "pod nodeSelector 的标签至少有一个节点满足",
+                "judgment": "如果没有节点匹配标签，给节点加标签或移除/修改 nodeSelector",
+            },
+        ],
+        "verify": "kubectl get pod 显示 Running 且 READY 列正常。",
+        "rollback": "如果为了调度成功临时调小了 resources requests：\n# 部署稳定后调回合理值\nkubectl set resources deployment/<deployment名> -n <namespace> --requests=cpu=<原值>,memory=<原值>\n# 滚动更新\nkubectl rollout restart deployment/<deployment名> -n <namespace>",
+    },
+    # ─────────────── 14. Docker 容器无法启动 ───────────────
+    {
+        "id": "docker-container-start-failure",
+        "title": "Docker 容器无法启动排查",
+        "keywords": ["docker 容器", "容器无法启动", "container cannot start", "docker 启动失败", "exited immediately", "容器启动即退出", "docker error", "container 启动"],
+        "summary": "Docker 容器启动后立即退出（Exited 状态），或根本无法创建。常见于端口冲突、权限问题、配置错误、镜像问题、entrypoint/command 错误。",
+        "root_causes": [
+            {"cause": "容器启动后进程立即退出（前台无守护进程运行）", "verify": "docker logs 查看退出原因", "probability": "高"},
+            {"cause": "端口冲突（宿主机端口已被占用）", "verify": "ss -tlnp 查端口占用", "probability": "高"},
+            {"cause": "镜像问题（不存在/tag 错误/架构不匹配）", "verify": "docker pull 测试镜像", "probability": "中"},
+            {"cause": "挂载路径不存在或权限不足", "verify": "检查 volume 挂载路径", "probability": "中"},
+            {"cause": "entrypoint/command 配置错误", "verify": "docker inspect 看 Cmd/Entrypoint", "probability": "中"},
+        ],
+        "steps": [
+            {
+                "action": "确认容器状态和退出码",
+                "command": "docker ps -a | grep <容器名>\n# 查看退出码\ndocker inspect <容器名> --format='{{.State.ExitCode}} {{.State.Error}}'",
+                "expected": "STATUS 显示 Exited (退出码) 或 Created",
+                "judgment": "退出码 0→进程正常退出（可能没前台进程）；127→命令找不到；126→权限不足；137→OOM；1→应用报错",
+            },
+            {
+                "action": "查看容器日志",
+                "command": "docker logs <容器名>\n# 如果日志为空，查看容器启动日志\ndocker logs <容器名> 2>&1 | head -30",
+                "expected": "应用启动日志或报错信息",
+                "judgment": "根据日志定位：配置错误→修配置；依赖缺失→补依赖；端口冲突→改端口；权限不足→修权限",
+            },
+            {
+                "action": "检查端口冲突",
+                "command": "# 查看宿主机端口占用\nss -tlnp | grep <宿主机映射端口>\n# 或\nnetstat -tlnp | grep <端口>",
+                "expected": "端口未被其他进程占用",
+                "judgment": "如果端口被占，停止占用进程或修改容器端口映射",
+            },
+            {
+                "action": "检查镜像是否存在和架构",
+                "command": "# 重新拉取镜像测试\ndocker pull <镜像名>:<tag>\n# 查看镜像架构\ndocker inspect <镜像名>:<tag> --format='{{.Architecture}} {{.Os}}'",
+                "expected": "镜像拉取成功，架构与宿主机匹配（如 x86 宿主机需 amd64 镜像）",
+                "judgment": "镜像不存在→检查 tag 拼写；架构不匹配→用正确架构的镜像（如 --platform linux/amd64）",
+            },
+            {
+                "action": "检查挂载路径和权限",
+                "command": "# 查看挂载配置\ndocker inspect <容器名> --format='{{json .Mounts}}' | python -m json.tool\n# 检查宿主机路径是否存在\nls -la <宿主机挂载路径>",
+                "expected": "宿主机路径存在且容器进程有读写权限",
+                "judgment": "路径不存在→创建目录；权限不足→chown/chmod 修改权限或检查容器 user 配置",
+            },
+            {
+                "action": "临时用交互模式进入容器排查",
+                "command": "# 覆盖 entrypoint 用 shell 进入\ndocker run -it --entrypoint /bin/sh <镜像名>:<tag>\n# 或\ndocker run -it --entrypoint /bin/bash <镜像名>:<tag>",
+                "expected": "进入容器 shell",
+                "judgment": "在容器内手动执行原 entrypoint 命令，看具体报错；也可检查容器内文件/配置是否正确",
+            },
+        ],
+        "verify": "docker ps 显示容器 Up 状态，且 curl/访问业务端口正常响应。",
+        "rollback": "如果修改了容器配置导致更严重，恢复原始配置：\n# 删除问题容器\ndocker rm <容器名>\n# 用原始命令重新启动\ndocker run -d --name <容器名> <原始参数> <镜像名>",
+    },
+    # ─────────────── 15. Nginx 配置语法错误 ───────────────
+    {
+        "id": "nginx-config-error",
+        "title": "Nginx 配置语法错误排查",
+        "keywords": ["nginx", "配置错误", "nginx -t", "syntax error", "nginx reload", "nginx failed", "nginx 配置", "proxy_pass", "upstream", "nginx 报错"],
+        "summary": "Nginx 配置文件语法错误导致 nginx -t 失败或 reload 后服务异常。常见于缺少分号、括号不匹配、proxy_pass 写错、upstream 未定义。",
+        "root_causes": [
+            {"cause": "配置行缺少分号或括号不匹配", "verify": "nginx -t 报错定位行号", "probability": "高"},
+            {"cause": "proxy_pass 指向的 upstream/service 不存在或写错", "verify": "检查 upstream 定义和 service 可达性", "probability": "高"},
+            {"cause": "include 的子配置文件本身有语法错误", "verify": "nginx -t 会报具体文件和行号", "probability": "中"},
+            {"cause": "变量未定义或拼写错误（如 $host 写成 $hot）", "verify": "nginx -t 报 unknown variable", "probability": "中"},
+            {"cause": "SSL 证书路径错误或文件不存在", "verify": "检查 ssl_certificate 路径", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "运行 nginx -t 定位语法错误",
+                "command": "nginx -t\n# 或指定配置文件\nnginx -t -c /etc/nginx/nginx.conf",
+                "expected": "test is successful 或报错含具体文件名和行号",
+                "judgment": "根据报错的文件和行号直接定位修改；常见报错：missing semicolon、unexpected '}'、unknown directive",
+            },
+            {
+                "action": "查看报错行附近的配置",
+                "command": "# 报错说第 N 行有问题，查看该行附近配置\nsed -n '$((N-5)),$((N+5))p' <配置文件>\n# 或\ncat -n <配置文件> | sed -n '$((N-5)),$((N+5))p'",
+                "expected": "看到报错行的配置内容",
+                "judgment": "检查是否缺少分号、括号是否匹配、指令拼写是否正确",
+            },
+            {
+                "action": "检查 proxy_pass 和 upstream 配置",
+                "command": "# 查看所有 proxy_pass\ngrep -rn 'proxy_pass' /etc/nginx/\n# 查看 upstream 定义\ngrep -rn 'upstream' /etc/nginx/ -A5",
+                "expected": "proxy_pass 指向的 upstream/service 名称与定义一致",
+                "judgment": "proxy_pass 引用了未定义的 upstream→补 upstream 定义或修正名称；upstream 的 server 地址不可达→修正地址",
+            },
+            {
+                "action": "检查 include 的子配置文件",
+                "command": "# 查看 nginx.conf 的 include\ngrep 'include' /etc/nginx/nginx.conf\n# 逐个检查子配置文件语法\nfor f in /etc/nginx/conf.d/*.conf; do echo \"=== $f ===\"; nginx -t 2>&1 | grep \"$f\"; done",
+                "expected": "所有子配置文件语法正确",
+                "judgment": "定位到具体哪个子配置文件有问题，针对性修改",
+            },
+            {
+                "action": "检查 SSL 证书配置（如果配置了 HTTPS）",
+                "command": "# 查看 SSL 配置\ngrep -rn 'ssl_certificate' /etc/nginx/\n# 验证证书文件存在\nls -la <证书路径>\n# 验证证书和 key 匹配\nopenssl x509 -in <cert.pem> -noout -modulus | md5sum\nopenssl rsa -in <key.pem> -noout -modulus | md5sum",
+                "expected": "证书和 key 文件存在，且两者的 modulus 一致",
+                "judgment": "文件不存在→修正路径；modulus 不一致→证书和 key 不匹配，重新获取",
+            },
+            {
+                "action": "reload 前先备份，确认无误再 reload",
+                "command": "# 备份当前可用配置\ncp -r /etc/nginx /etc/nginx.bak.$(date +%F)\n# 修复后测试\nnginx -t\n# 测试通过再 reload\nnginx -s reload\n# 或\nsystemctl reload nginx",
+                "expected": "nginx -t 通过，reload 后服务正常",
+                "judgment": "reload 后如果服务异常，立即回滚到备份配置",
+            },
+        ],
+        "verify": "nginx -t 返回 test is successful，且 curl http://<域名> 正常响应。",
+        "rollback": "如果 reload 后服务全挂，立即回滚：\n# 恢复备份配置\ncp -r /etc/nginx.bak.<日期>/* /etc/nginx/\n# 重载（如果 nginx -t 通过）\nnginx -t && nginx -s reload\n# 如果 nginx -t 也失败，直接重启 nginx 用备份\nsystemctl restart nginx",
+    },
 ]
 
 
@@ -546,22 +816,61 @@ def match_runbook(query):
     best_match = None
     best_score = 0
     for rb in RUNBOOKS:
-        score = 0
-        for kw in rb["keywords"]:
-            kw_lower = kw.lower()
-            if kw_lower in query_lower:
-                score += len(kw_lower)  # 关键词越长权重越高
-            if query_lower in kw_lower:
-                score += len(query_lower) * 2  # 精确匹配权重更高
-        # id 也参与匹配
-        if rb["id"].lower() in query_lower:
-            score += len(rb["id"])
-        if query_lower == rb["id"].lower():
-            score += 50
+        score = _score_runbook(rb, query_lower)
         if score > best_score:
             best_score = score
             best_match = rb
     return best_match if best_score > 0 else None
+
+
+def _score_runbook(rb, query_lower):
+    """计算单个 runbook 与查询的匹配分数（内部函数）。
+    评分规则：
+    - 关键词 == 查询（精确匹配）：+50（最高，用户说的就是这个词）
+    - 关键词 in 查询（查询包含关键词，关键词是查询的子串）：+len(kw)*2（关键词越长越具体）
+    - 查询 in 关键词（关键词包含查询，查询是关键词的子串）：+len(query)（弱匹配，可能是泛化词）
+    - id 匹配额外加分
+    - title 匹配（弱加分，帮助自然语言命中）
+    """
+    score = 0
+    for kw in rb["keywords"]:
+        kw_lower = kw.lower()
+        if kw_lower == query_lower:
+            score += 50  # 精确匹配最高
+        elif kw_lower in query_lower:
+            score += len(kw_lower) * 2  # 查询包含关键词，关键词越长越具体
+        elif query_lower in kw_lower:
+            score += len(query_lower)  # 关键词包含查询，弱匹配
+    # id 也参与匹配
+    if rb["id"].lower() == query_lower:
+        score += 100
+    elif rb["id"].lower() in query_lower:
+        score += len(rb["id"]) * 2
+    elif query_lower in rb["id"].lower():
+        score += len(query_lower)
+    # title 弱参与匹配（帮助自然语言命中，但权重低于关键词）
+    title_lower = rb["title"].lower()
+    for word in query_lower.split():
+        if word in title_lower and len(word) >= 3:
+            score += len(word)  # title 单词命中加弱分
+    return score
+
+
+def match_runbooks_topn(query, n=3):
+    """返回与查询最相关的 N 个 runbook（按分数降序）。
+    用于未匹配精确 runbook 时推荐最接近的。
+    返回 [(runbook, score), ...]，可能为空。
+    """
+    if not query:
+        return []
+    query_lower = query.lower().strip()
+    scored = []
+    for rb in RUNBOOKS:
+        score = _score_runbook(rb, query_lower)
+        if score > 0:
+            scored.append((rb, score))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:n]
 
 
 # ============================================================

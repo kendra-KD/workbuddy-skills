@@ -193,3 +193,98 @@ python scripts/runbook_matcher.py <关键词>
 **关键命令**：`kubectl describe pod`、`kubectl top pod`、`kubectl logs --previous`、`jps -v`、`jmap -dump`、`kubectl cp`
 
 **Java 特别注意**：-Xmx 应小于 pod memory limit 的 75%，留空间给非堆内存。
+
+---
+
+### 11. `dns-resolution-failure` · DNS 解析失败排查
+
+**适用**：域名无法解析或解析到错误 IP，服务访问失败。
+
+**根因覆盖**：
+- DNS 服务器不可达或故障（🔴 高）
+- 域名未注册/已过期/DNS 记录未生效（🔴 高）
+- K8s CoreDNS 异常（🟡 中）
+- 本地 /etc/resolv.conf 配置错误（🟡 中）
+- DNS 缓存了错误结果（🟢 低）
+
+**排查步骤要点**：确认是否 DNS 问题 → 查本地 DNS 配置 → 查域名注册和 DNS 记录 → K8s 查 CoreDNS → 查 DNS 服务商控制台 → 清 DNS 缓存重试
+
+**关键命令**：`nslookup`、`dig`、`whois`、`kubectl get pod -n kube-system | grep coredns`、`cat /etc/resolv.conf`
+
+**与 timeout 的区别**：timeout 是网络层超时（连不上 IP），DNS 失败是连 IP 都没拿到（解析阶段就挂了）。
+
+---
+
+### 12. `db-connection-failure` · 数据库连接失败排查
+
+**适用**：应用无法连接 MySQL/PostgreSQL/Redis，连接失败或超时。
+
+**根因覆盖**：
+- 数据库服务未启动或崩溃（🔴 高）
+- 网络不通（防火墙/安全组/网络策略）（🔴 高）
+- 凭据错误（🔴 高）
+- 连接池耗尽（🟡 中）
+- 数据库只允许特定 IP 连接（🟡 中）
+
+**排查步骤要点**：确认数据库存活 → 测试端口连通性 → 命令行客户端相同凭据测试 → 查连接数和 max_connections → 查访问控制配置 → 查应用侧配置
+
+**关键命令**：`mysql -h ... -u ... -p`、`psql -h ... -U ...`、`redis-cli -h ... -a ...`、`SHOW PROCESSLIST`、`SHOW VARIABLES LIKE 'max_connections'`、`grep bind-address`
+
+**与 connection-refused 的区别**：connection-refused 是端口明确拒绝（网络层），db-connection-failure 是数据库层面的全面排查（含凭据/连接池/权限/配置）。
+
+---
+
+### 13. `pod-pending` · K8s Pod Pending 排查
+
+**适用**：Pod 一直 Pending 无法调度，kubectl describe 显示 FailedScheduling。
+
+**根因覆盖**：
+- 节点 CPU/内存资源不足（🔴 高）
+- 节点有污点且 pod 未配 toleration（🔴 高）
+- PVC 绑定失败（🟡 中）
+- 节点 NotReady（🟡 中）
+- nodeSelector 标签不匹配（🟢 低）
+
+**排查步骤要点**：describe pod 看 Events → 查节点资源水位 → 查节点污点和 toleration → 查 PVC 状态 → 查节点 NotReady → 查 nodeSelector 标签
+
+**关键命令**：`kubectl describe pod`、`kubectl top nodes`、`kubectl get nodes -o custom-columns=...,TAINTS:...`、`kubectl get pvc`、`kubectl get nodes -o wide`
+
+**与 pod-crashloopbackoff 的区别**：Pending 是还没调度上去（没运行过），CrashLoopBackOff 是调度上去了但反复崩溃重启。
+
+---
+
+### 14. `docker-container-start-failure` · Docker 容器无法启动排查
+
+**适用**：Docker 容器启动后立即退出（Exited）或无法创建。
+
+**根因覆盖**：
+- 容器启动后进程立即退出（🔴 高）
+- 端口冲突（🔴 高）
+- 镜像问题（🟡 中）
+- 挂载路径不存在或权限不足（🟡 中）
+- entrypoint/command 配置错误（🟡 中）
+
+**排查步骤要点**：确认退出码 → docker logs → 查端口冲突 → 查镜像和架构 → 查挂载路径和权限 → 交互模式进入容器手动排查
+
+**关键命令**：`docker ps -a`、`docker inspect --format='{{.State.ExitCode}}'`、`docker logs`、`ss -tlnp`、`docker pull`、`docker run -it --entrypoint /bin/sh`
+
+**退出码速查**：0=正常退出（无前台进程）；127=命令找不到；126=权限不足；137=OOM；1=应用报错。
+
+---
+
+### 15. `nginx-config-error` · Nginx 配置语法错误排查
+
+**适用**：nginx -t 失败或 reload 后服务异常，配置文件语法错误。
+
+**根因覆盖**：
+- 配置行缺少分号或括号不匹配（🔴 高）
+- proxy_pass 指向的 upstream/service 不存在（🔴 高）
+- include 的子配置文件有语法错误（🟡 中）
+- 变量未定义或拼写错误（🟡 中）
+- SSL 证书路径错误或文件不存在（🟢 低）
+
+**排查步骤要点**：nginx -t 定位错误行 → 查报错行附近配置 → 查 proxy_pass 和 upstream → 查 include 子配置 → 查 SSL 证书配置 → 备份后 reload
+
+**关键命令**：`nginx -t`、`grep -rn 'proxy_pass' /etc/nginx/`、`grep -rn 'upstream' /etc/nginx/ -A5`、`openssl x509 -noout -modulus | md5sum`、`nginx -s reload`
+
+**安全提醒**：reload 前必须 nginx -t 测试通过，且备份当前可用配置；reload 后异常立即回滚备份。
