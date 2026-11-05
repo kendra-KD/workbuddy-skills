@@ -288,3 +288,139 @@ python scripts/runbook_matcher.py <关键词>
 **关键命令**：`nginx -t`、`grep -rn 'proxy_pass' /etc/nginx/`、`grep -rn 'upstream' /etc/nginx/ -A5`、`openssl x509 -noout -modulus | md5sum`、`nginx -s reload`
 
 **安全提醒**：reload 前必须 nginx -t 测试通过，且备份当前可用配置；reload 后异常立即回滚备份。
+
+---
+
+### 16. `k8s-node-notready` · K8s 节点 NotReady 排查
+
+**适用**：K8s 节点状态变为 NotReady，该节点上的 pod 无法被访问或新 pod 无法调度。
+
+**根因覆盖**：
+- kubelet 进程异常或证书过期（🔴 高）
+- 网络插件（flannel/calico/cilium）异常（🔴 高）
+- 节点磁盘满导致 kubelet 无法写入（🟡 中）
+- 节点内存或 CPU 压力过大（🟡 中）
+- API Server 与节点网络不可达（🟢 低）
+
+**排查步骤要点**：`kubectl get nodes` 确认状态 → `systemctl status kubelet` + `journalctl -u kubelet` → 检查 CNI pod 状态 → 检查节点资源（df/free/top） → 测试节点到 API Server 6443 连通性
+
+**关键命令**：`kubectl get nodes -o wide`、`systemctl status kubelet`、`journalctl -u kubelet -n 200`、`kubectl get pod -n kube-system | grep -E 'flannel|calico|cilium'`、`df -h`、`free -m`、`curl -k https://<apiserver>:6443/healthz`
+
+---
+
+### 17. `mysql-slow-query` · MySQL 慢查询排查
+
+**适用**：MySQL 查询响应慢，业务反馈数据库卡慢。
+
+**根因覆盖**：
+- 缺少合适索引或索引未生效（🔴 高）
+- SQL 写法导致全表扫描（🔴 高）
+- 表数据量过大且未分区/归档（🟡 中）
+- 锁等待或死锁（ 中）
+- 服务器 IO/CPU/内存瓶颈（🟢 低）
+
+**排查步骤要点**：确认慢查询日志或 performance_schema → `EXPLAIN` 分析执行计划 → 检查表索引和统计信息 → 检查锁等待和并发情况 → 监控服务器资源
+
+**关键命令**：`tail -n 100 /var/lib/mysql/slow.log`、`EXPLAIN <慢 SQL>`、`SHOW INDEX FROM <表名>`、`SHOW ENGINE INNODB STATUS`、`SHOW PROCESSLIST`、`iostat -x 1 5`
+
+---
+
+### 18. `redis-memory-full` · Redis 内存满/OOM 排查
+
+**适用**：Redis 内存使用达到上限，写入失败、驱逐异常或 OOM。
+
+**根因覆盖**：
+- maxmemory 设置过低（🔴 高）
+- 缓存数据未设置过期时间（ 高）
+- 存在大 key 或热 key（🟡 中）
+- 淘汰策略为 noeviction（🟡 中）
+- 客户端连接/管道使用不当（🟢 低）
+
+**排查步骤要点**：`redis-cli INFO memory` 确认内存使用 → 检查 `maxmemory` 和 `maxmemory-policy` → `redis-cli --bigkeys` 找大 key → 抽样检查 key TTL → 清理或扩容
+
+**关键命令**：`redis-cli INFO memory`、`redis-cli CONFIG GET maxmemory`、`redis-cli --bigkeys`、`redis-cli --scan --pattern '*'`、`redis-cli CONFIG SET maxmemory-policy allkeys-lru`
+
+---
+
+### 19. `ingress-not-working` · K8s Ingress 访问不通排查
+
+**适用**：通过 Ingress 访问服务失败，包括 502/503/域名访问不到/HTTPS 证书错误。
+
+**根因覆盖**：
+- Ingress Controller pod 异常（🔴 高）
+- Ingress 的 host/path 规则配置错误（ 高）
+- 后端 service/pod 异常（🔴 高）
+- SSL 证书配置错误（🟡 中）
+- DNS 解析错误或本地 hosts 未配置（🟡 中）
+
+**排查步骤要点**：检查 Ingress Controller pod 状态和日志 → `kubectl describe ingress` 确认 host/path/backend → 检查后端 service/endpoints/pod → 检查 TLS secret → 从集群内直接测试后端 service
+
+**关键命令**：`kubectl get pod -n <ic-ns>`、`kubectl describe ingress <名> -n <ns>`、`kubectl get endpoints <svc>`、`kubectl get secret <tls-secret>`、`kubectl exec -it <pod> -- curl http://<svc>:<port>`
+
+---
+
+### 20. `jenkins-build-failure` · Jenkins 构建失败排查
+
+**适用**：Jenkins 构建/流水线失败，包括编译失败、依赖下载失败、环境配置错误、权限不足、节点资源不足。
+
+**根因覆盖**：
+- 代码编译/测试失败（🔴 高）
+- 依赖下载失败（网络/私服/版本不存在）（🔴 高）
+- Jenkins agent 节点环境缺失（🟡 中）
+- 权限不足（无法拉取代码/推送镜像）（🟡 中）
+- 节点磁盘/内存/CPU 不足（🟢 低）
+
+**排查步骤要点**：查看 Console Output 定位错误 → 检查依赖/包下载是否成功 → 检查 Jenkins 节点环境和工具版本 → 检查凭据和权限 → 检查节点资源
+
+**关键命令**：`curl -u <user>:<token> '<jenkins>/job/<job>/<build>/consoleText'`、`which java mvn node npm docker git`、`git clone <repo>`、`docker login <registry>`、`df -h`、`free -m`、`nproc`
+
+---
+
+### 21. `docker-image-pull-failure` · Docker 镜像拉取失败排查
+
+**适用**：K8s pod 或 Docker 拉取镜像失败，出现 ImagePullBackOff/ErrImagePull。
+
+**根因覆盖**：
+- 镜像不存在或 tag 错误（🔴 高）
+- 镜像仓库需认证（无权限/secret 错误）（🔴 高）
+- 网络不通或 DNS 解析失败（🟡 中）
+- 镜像架构不匹配（如 arm64 节点拉 amd64 镜像）（🟡 中）
+- 镜像仓库限流或故障（🟢 低）
+
+**排查步骤要点**：`kubectl describe pod` 查看 Events → 确认镜像名和 tag 正确 → 手动 `docker pull` 验证 → 检查 imagePullSecrets 和认证 → 检查节点网络到仓库 → 确认镜像架构
+
+**关键命令**：`kubectl describe pod <pod> -n <ns>`、`docker pull <镜像>:<tag>`、`docker login <registry>`、`kubectl get secret <pull-secret> -n <ns>`、`crane manifest <镜像>:<tag>` 或 `docker manifest inspect`
+
+---
+
+### 22. `high-cpu-usage` · CPU 使用率过高排查
+
+**适用**：服务器或容器 CPU 使用率持续高位，业务响应变慢。
+
+**根因覆盖**：
+- 某进程死循环或计算密集型任务（🔴 高）
+- 并发量突增（🟡 中）
+- 定时任务/批处理集中执行（🟡 中）
+- 应用代码性能问题（如低效 SQL/算法）（🟢 低）
+- 系统资源本身不足（🟢 低）
+
+**排查步骤要点**：`top`/`htop` 找高 CPU 进程 → 找线程（`top -H` / `ps -eL`） → 抓堆栈/火焰图 → 分析代码或 SQL → 限制或扩容
+
+**关键命令**：`top -bn1 -o %CPU`、`ps -eLo pid,tid,comm,%cpu --sort=-%cpu | head -20`、`top -H -p <pid>`、`jstack <pid>` 或 `perf top`、`pidstat -u 1 5`
+
+---
+
+### 23. `log-disk-full` · 日志目录磁盘满排查
+
+**适用**：`/var/log` 等日志目录磁盘满，影响服务写入和系统稳定。
+
+**根因覆盖**：
+- 日志未轮转或轮转周期过长（ 高）
+- 应用日志级别过低/量过大（🔴 高）
+- 某个进程持续写超大日志（🟡 中）
+- 日志清理脚本失效（🟡 中）
+- 磁盘容量本身过小（🟢 低）
+
+**排查步骤要点**：`df -h` 确认哪个目录满 → `du -sh /var/log/*` 定位大日志 → 检查 logrotate 配置 → 清理/压缩过期日志 → 调整日志级别/轮转策略 → 监控防止复发
+
+**关键命令**：`df -h`、`du -sh /var/log/*`、`ls -lhS /var/log/ | head -20`、`lsof +L1 /var/log`（找已删除但仍被占用的文件）、`logrotate -d /etc/logrotate.conf`、`journalctl --vacuum-time=7d`

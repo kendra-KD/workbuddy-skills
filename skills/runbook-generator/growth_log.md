@@ -89,3 +89,41 @@ SkillHub 后台数据显示 ops-fault-runbook 是四件套下载量最高的（1
 ### 待观察
 - 15 个 runbook 的关键词覆盖是否够：等 v1.1 发布后看是否有人反馈"输入 XX 匹配不到"。
 - title 弱匹配是否会导致误匹配：`gateway` 可能同时命中 502/503/504 的 title，需观察是否需要进一步区分。
+
+---
+
+## #003 · 2026-11-05 · v1.2 升级（再扩 8 个 runbook，覆盖更完整）
+
+### 触发场景
+用户希望在继续深挖 runbook 的同时扩展 skill 类型和范围。ops-fault-runbook 下载量仍是四件套最高（28 次），且增速稳定，决定继续扩 runbook 到 23 个，进一步巩固"运维故障排查"类目的头部位置。
+
+### 方案选择
+- **扩 8 个 runbook**（15→23）：
+  - `k8s-node-notready` · K8s 节点 NotReady 排查
+  - `mysql-slow-query` · MySQL 慢查询排查
+  - `redis-memory-full` · Redis 内存满/OOM 排查
+  - `ingress-not-working` · K8s Ingress 访问不通排查
+  - `jenkins-build-failure` · Jenkins 构建失败排查
+  - `docker-image-pull-failure` · Docker 镜像拉取失败排查
+  - `high-cpu-usage` · CPU 使用率过高排查
+  - `log-disk-full` · 日志目录磁盘满排查
+- **选取标准**：① 用户真实工作场景 ② 现有 15 个未覆盖 ③ 中文运维高频故障 ④ 命令可复制执行
+- **匹配算法不变**：沿用 v1.1 的三级评分 + title 弱匹配，新增 runbook 时注意关键词不冲突（如 `log-disk-full` 和 `disk-full` 区分关键词，`ingress-not-working` 与 `http-502/503/504` 互补）
+- **版本**：1.1.1 → 1.2.0（新增 8 个 runbook，属功能升级，发 minor）
+
+### 最终效果
+- runbook_lib.py：15 个 → 23 个 runbook
+- SKILL.md：version→1.2.0，description 和内置清单表补全 23 个 runbook
+- runbook_catalog.md：追加 8 个新 runbook 详解
+- growth_log.md：追加本记录
+- 实测待验证
+
+### 关键决策
+1. **继续深挖而非开新 skill**：runbook 仍是四件套中下载量最高的 skill，扩模板比做新 skill 投入产出比更高。
+2. **新增 runbook 覆盖"资源类"和"CI/CD 类"故障**：CPU 高、日志目录满、Jenkins 构建失败、镜像拉取失败是此前未覆盖但高频的场景。
+3. **保持纯规则引擎定位**：v1.2 不引入 AI，继续发挥零成本零延迟优势。
+
+### 待观察
+- 23 个 runbook 是否导致匹配稀释：需实测验证输入原有关键词是否仍能正确命中。
+- 新增 runbook 的自然语言召回率：如"节点掉了"能否命中 `k8s-node-notready`。
+- 下一步是否继续扩到 30 个，或转向 ops-config-audit 等新 skill。

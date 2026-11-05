@@ -790,7 +790,394 @@ RUNBOOKS = [
         "verify": "nginx -t 返回 test is successful，且 curl http://<域名> 正常响应。",
         "rollback": "如果 reload 后服务全挂，立即回滚：\n# 恢复备份配置\ncp -r /etc/nginx.bak.<日期>/* /etc/nginx/\n# 重载（如果 nginx -t 通过）\nnginx -t && nginx -s reload\n# 如果 nginx -t 也失败，直接重启 nginx 用备份\nsystemctl restart nginx",
     },
+    # ─────────────── 16. K8s 节点 NotReady ───────────────
+    {
+        "id": "k8s-node-notready",
+        "title": "K8s 节点 NotReady 排查",
+        "keywords": ["node notready", "notready", "节点 not ready", "k8s 节点", "node 异常", "kubelet 掉线", "节点不可调度", "node not ready", "节点掉了", "节点掉线", "node 掉了"],
+        "summary": "K8s 节点状态变为 NotReady，导致该节点上的 pod 无法被访问或新 pod 无法调度。常见原因：kubelet 异常、网络插件异常、磁盘/内存/CPU 资源耗尽、节点网络不可达。",
+        "root_causes": [
+            {"cause": "kubelet 进程异常或证书过期", "verify": "systemctl status kubelet / journalctl -u kubelet", "probability": "高"},
+            {"cause": "网络插件（flannel/calico/cilium）异常", "verify": "kubectl get pod -n kube-system | grep -E 'flannel|calico|cilium'", "probability": "高"},
+            {"cause": "节点磁盘满导致 kubelet 无法写入", "verify": "df -h", "probability": "中"},
+            {"cause": "节点内存或 CPU 压力过大", "verify": "top / free -m", "probability": "中"},
+            {"cause": "API Server 与节点网络不可达", "verify": "从节点 curl API Server 6443 端口", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "确认节点 NotReady 状态和数量",
+                "command": "kubectl get nodes -o wide\nkubectl describe node <节点名>",
+                "expected": "看到节点状态 NotReady 和具体 Conditions 信息",
+                "judgment": "单个节点 NotReady→节点本身问题；多个节点同时 NotReady→网络/控制面问题",
+            },
+            {
+                "action": "检查 kubelet 状态和日志",
+                "command": "# 在节点上执行\nsystemctl status kubelet\njournalctl -u kubelet -n 200 --no-pager | tail -50",
+                "expected": "kubelet 是否 running，日志有无报错",
+                "judgment": "kubelet 未 running→启动或重启；证书过期→轮换证书；持续报错→根据错误定位",
+            },
+            {
+                "action": "检查网络插件 pod 状态",
+                "command": "kubectl get pod -n kube-system -o wide | grep -E 'flannel|calico|cilium|weave'\nkubectl describe pod <网络插件pod> -n kube-system | tail -30",
+                "expected": "网络插件 pod 处于 Running/Ready 状态",
+                "judgment": "网络插件 CrashLoopBackOff 或 Pending→按对应 pod 问题排查，通常是 CNI 配置或节点资源问题",
+            },
+            {
+                "action": "检查节点资源是否耗尽",
+                "command": "df -h\nfree -m\ntop -bn1 | head -20",
+                "expected": "磁盘未满载、内存未耗尽、CPU 未长期 100%",
+                "judgment": "磁盘满→清理；内存 OOM→排查占用进程；CPU 打满→定位高负载进程",
+            },
+            {
+                "action": "测试节点到 API Server 的网络连通性",
+                "command": "# 在节点上执行\ncurl -k https://<apiserver>:6443/healthz --cacert /etc/kubernetes/pki/ca.crt --cert /etc/kubernetes/pki/kubelet-client-current.pem --key /etc/kubernetes/pki/kubelet-client-current.pem\n# 或简单测试端口连通性\ntelnet <apiserver> 6443",
+                "expected": "API Server 返回 ok",
+                "judgment": "如果连不上 API Server→检查网络/防火墙/安全组；能连通但节点仍 NotReady→继续排查 kubelet/证书",
+            },
+        ],
+        "verify": "kubectl get nodes 显示该节点为 Ready，节点上的 pod 正常 Running。",
+        "rollback": "如果修改了 kubelet/网络配置导致更严重，回滚修改：\n# 恢复 kubelet 配置备份\ncp /etc/kubernetes/kubelet.conf.bak /etc/kubernetes/kubelet.conf\nsystemctl restart kubelet\n# 恢复 CNI 配置\nkubectl rollout restart daemonset/<cni-ds> -n kube-system",
+    },
+    # ─────────────── 17. MySQL 慢查询 ───────────────
+    {
+        "id": "mysql-slow-query",
+        "title": "MySQL 慢查询排查",
+        "keywords": ["mysql 慢查询", "slow query", "慢 sql", "查询慢", "mysql 慢", "select 慢", "数据库慢", "慢查询日志", "数据库查询慢", "SQL 慢", "sql 慢", "查询特别慢"],
+        "summary": "MySQL 查询响应慢，影响业务。常见原因：缺少索引、SQL 写法不佳、数据量过大、锁等待、硬件资源不足。",
+        "root_causes": [
+            {"cause": "缺少合适索引或索引未生效", "verify": "EXPLAIN 查看执行计划", "probability": "高"},
+            {"cause": "SQL 写法导致全表扫描", "verify": "EXPLAIN 中 type=ALL", "probability": "高"},
+            {"cause": "表数据量过大且未分区/归档", "verify": "查看表行数和分区情况", "probability": "中"},
+            {"cause": "锁等待或死锁", "verify": "SHOW ENGINE INNODB STATUS", "probability": "中"},
+            {"cause": "服务器 IO/CPU/内存瓶颈", "verify": "iostat/top/free", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "确认慢查询现象和范围",
+                "command": "# 查看慢查询日志（需开启）\ntail -n 100 /var/lib/mysql/slow.log\n# 或查询 performance_schema\nSELECT * FROM performance_schema.events_statements_summary_by_digest ORDER BY SUM_TIMER_WAIT DESC LIMIT 10;",
+                "expected": "定位到具体慢 SQL",
+                "judgment": "只有个别 SQL 慢→优化 SQL；大量 SQL 都慢→检查服务器资源或参数配置",
+            },
+            {
+                "action": "分析慢 SQL 执行计划",
+                "command": "EXPLAIN <慢 SQL>;\n# 或\nEXPLAIN FORMAT=JSON <慢 SQL>;",
+                "expected": "看 type、key、rows、Extra 字段",
+                "judgment": "type=ALL 且无 key→加索引；rows 巨大→考虑分区/归档；Using filesort/temporary→优化 ORDER BY/GROUP BY",
+            },
+            {
+                "action": "检查表索引和统计信息",
+                "command": "SHOW INDEX FROM <表名>;\nSHOW TABLE STATUS LIKE '<表名>';\nANALYZE TABLE <表名>;",
+                "expected": "索引合理，表统计信息最新",
+                "judgment": "缺少索引→创建；统计信息过期→ANALYZE；索引碎片化严重→OPTIMIZE",
+            },
+            {
+                "action": "检查锁等待和并发情况",
+                "command": "SHOW ENGINE INNODB STATUS;\nSHOW PROCESSLIST;\nSELECT * FROM information_schema.INNODB_TRX;",
+                "expected": "无长时间运行事务，无大量锁等待",
+                "judgment": "长事务→kill 或优化；锁等待→定位并优化事务；死锁→调整事务顺序或索引",
+            },
+            {
+                "action": "监控服务器资源",
+                "command": "iostat -x 1 5\ntop -bn1 | head -20\nfree -m",
+                "expected": "CPU/IO/内存未达瓶颈",
+                "judgment": "IO 瓶颈→升级磁盘或优化 SQL；CPU 瓶颈→优化 SQL 或扩容；内存不足→调整 buffer pool",
+            },
+        ],
+        "verify": "慢 SQL 执行时间显著下降，业务响应恢复正常。",
+        "rollback": "如果新增索引导致写入变慢或锁表：\n# 删除新索引\nALTER TABLE <表名> DROP INDEX <新索引名>;\n# 如果 ANALYZE 导致问题，可重新收集统计信息",
+    },
+    # ─────────────── 18. Redis 内存满 ───────────────
+    {
+        "id": "redis-memory-full",
+        "title": "Redis 内存满/OOM 排查",
+        "keywords": ["redis 内存满", "redis oom", "memory full", "redis 内存不足", "used_memory", "maxmemory", "eviction", "redis memory"],
+        "summary": "Redis 内存使用达到上限，导致写入失败、驱逐异常或 OOM。常见原因：数据增长未清理、大 key 堆积、maxmemory 设置过低、未配置淘汰策略。",
+        "root_causes": [
+            {"cause": "maxmemory 设置过低", "verify": "CONFIG GET maxmemory", "probability": "高"},
+            {"cause": "缓存数据未设置过期时间", "verify": "INFO keyspace / 抽样检查 TTL", "probability": "高"},
+            {"cause": "存在大 key 或热 key", "verify": "redis-cli --bigkeys 或 rdbtools", "probability": "中"},
+            {"cause": "淘汰策略为 noeviction", "verify": "CONFIG GET maxmemory-policy", "probability": "中"},
+            {"cause": "客户端连接/管道使用不当", "verify": "CLIENT LIST / 慢查询日志", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "确认 Redis 内存使用情况",
+                "command": "redis-cli INFO memory\n# 关键字段\n# used_memory\n# used_memory_rss\n# maxmemory\n# maxmemory_policy",
+                "expected": "看到 used_memory 接近或超过 maxmemory",
+                "judgment": "used_memory ≥ maxmemory→触发上限；used_memory_rss 远大于 used_memory→存在内存碎片",
+            },
+            {
+                "action": "检查 maxmemory 和淘汰策略",
+                "command": "redis-cli CONFIG GET maxmemory\nredis-cli CONFIG GET maxmemory-policy",
+                "expected": "maxmemory 合理，淘汰策略非 noeviction（生产建议 allkeys-lru/volatile-lru）",
+                "judgment": "maxmemory 过小→调大；noeviction 且写入多→改淘汰策略或清理数据",
+            },
+            {
+                "action": "查找大 key 和热 key",
+                "command": "# 查找大 key（在线，可能阻塞）\nredis-cli --bigkeys\n# 或扫描大 key\nredis-cli --scan --pattern '*' | head -100 | xargs -I{} sh -c 'echo \"{} $(redis-cli debug object {} | grep serializedlength)\"'",
+                "expected": "定位到占用内存最大的 key",
+                "judgment": "大 key→拆分或删除；热 key→加本地缓存或做 key 拆分",
+            },
+            {
+                "action": "检查 key 过期情况",
+                "command": "redis-cli INFO keyspace\n# 抽样检查 TTL\nredis-cli --scan --pattern '*' | head -100 | xargs -I{} redis-cli TTL {}",
+                "expected": "大部分 key 有 TTL，无永久缓存",
+                "judgment": "大量无 TTL→业务加过期时间或定时清理；TTL 合理但总量大→扩容或归档",
+            },
+            {
+                "action": "清理或扩容",
+                "command": "# 临时删除无用大 key（确认后）\nredis-cli DEL <大key>\n# 或调整 maxmemory\nredis-cli CONFIG SET maxmemory <新值>\n# 调整淘汰策略\nredis-cli CONFIG SET maxmemory-policy allkeys-lru",
+                "expected": "used_memory 下降，写入恢复",
+                "judgment": "清理后观察内存趋势；如业务持续增长，需扩容或引入分级缓存",
+            },
+        ],
+        "verify": "redis-cli INFO memory 显示 used_memory 低于 maxmemory 的 80%，写入正常。",
+        "rollback": "如果调整 maxmemory-policy 导致热数据被驱逐：\n# 改回 noeviction 或原策略\nredis-cli CONFIG SET maxmemory-policy <原策略>\n# 如果误删大 key，只能从备份恢复",
+    },
+    # ─────────────── 19. K8s Ingress 访问不通 ───────────────
+    {
+        "id": "ingress-not-working",
+        "title": "K8s Ingress 访问不通排查",
+        "keywords": ["ingress", "ingress 访问不到", "ingress 不通", "k8s ingress", "ingress 502", "ingress 503", "域名访问不到", "ingress controller"],
+        "summary": "通过 Ingress 访问服务失败，可能是 ingress controller 异常、ingress 资源配置错误、后端 service/pod 异常、证书问题、DNS 解析错误。",
+        "root_causes": [
+            {"cause": "Ingress Controller pod 异常", "verify": "kubectl get pod -n <ic-ns> | grep ingress", "probability": "高"},
+            {"cause": "Ingress 的 host/path 规则配置错误", "verify": "kubectl describe ingress", "probability": "高"},
+            {"cause": "后端 service/pod 异常", "verify": "kubectl get endpoints / get pods", "probability": "高"},
+            {"cause": "SSL 证书配置错误", "verify": "kubectl describe ingress 看证书事件", "probability": "中"},
+            {"cause": "DNS 解析错误或本地 hosts 未配置", "verify": "nslookup / dig", "probability": "中"},
+        ],
+        "steps": [
+            {
+                "action": "检查 Ingress Controller pod 是否正常运行",
+                "command": "kubectl get pod -n <ingress-controller-ns> -o wide | grep ingress\nkubectl logs -n <ingress-controller-ns> <ingress-pod> --tail=100",
+                "expected": "Controller pod Running/Ready，日志无 ERROR",
+                "judgment": "Controller 异常→重启 pod 或排查 CrashLoopBackOff；日志报配置 reload 失败→检查 ingress 资源语法",
+            },
+            {
+                "action": "检查 Ingress 资源配置",
+                "command": "kubectl describe ingress <ingress名> -n <namespace>\nkubectl get ingress <ingress名> -n <namespace> -o yaml",
+                "expected": "host/path 与访问 URL 一致，backend service 和 port 正确",
+                "judgment": "host 不匹配→改 ingress 或域名；backend 错误→修正 serviceName/servicePort；path 错误→修正 path 类型或规则",
+            },
+            {
+                "action": "检查后端 service 和 pod",
+                "command": "kubectl get svc <service名> -n <namespace>\nkubectl get endpoints <service名> -n <namespace>\nkubectl get pod -n <namespace> | grep <服务名>",
+                "expected": "service 存在，endpoints 有 IP，pod Running/Ready",
+                "judgment": "endpoints 为空→pod 未 Ready 或 label 不匹配；pod 异常→按 pod 问题排查",
+            },
+            {
+                "action": "检查 SSL 证书配置",
+                "command": "kubectl get secret <tls-secret> -n <namespace>\nkubectl describe ingress <ingress名> -n <namespace> | grep -i cert",
+                "expected": "TLS secret 存在且与 ingress 配置一致",
+                "judgment": "secret 不存在→创建；证书过期→更新；secret 和 ingress 不在同一 namespace→复制 secret",
+            },
+            {
+                "action": "从集群内直接测试后端 service",
+                "command": "# 在 pod 内测试\nkubectl exec -it <debug-pod> -n <namespace> -- curl http://<service名>:<端口>/<路径>\n# 或临时 port-forward\nkubectl port-forward svc/<service名> <本地端口>:<服务端口> -n <namespace>",
+                "expected": "后端 service 直接访问正常",
+                "judgment": "后端直接访问异常→问题在后端；后端正常但 ingress 不通→问题在 ingress/controller/网络策略",
+            },
+        ],
+        "verify": "从外部访问 ingress 域名/path 返回预期结果，HTTPS 证书有效。",
+        "rollback": "如果修改了 ingress 配置导致异常：\n# 回滚到上一版本\nkubectl rollout undo ingress <ingress名> -n <namespace>\n# 或直接用备份 YAML 恢复\nkubectl apply -f <ingress-backup.yaml>",
+    },
+    # ─────────────── 20. Jenkins 构建失败 ───────────────
+    {
+        "id": "jenkins-build-failure",
+        "title": "Jenkins 构建失败排查",
+        "keywords": ["jenkins", "构建失败", "build failed", "jenkins 失败", "pipeline 失败", "jenkins 报错", "jenkins build"],
+        "summary": "Jenkins 构建/流水线失败，可能是代码问题、依赖拉取失败、环境配置错误、权限不足、节点资源不足。",
+        "root_causes": [
+            {"cause": "代码编译/测试失败", "verify": "查看 Console Output 定位错误行", "probability": "高"},
+            {"cause": "依赖下载失败（网络/私服/版本不存在）", "verify": "mvn/npm/pip 下载日志", "probability": "高"},
+            {"cause": "Jenkins agent 节点环境缺失", "verify": "检查节点工具和变量", "probability": "中"},
+            {"cause": "权限不足（无法拉取代码/推送镜像）", "verify": "凭据配置和权限", "probability": "中"},
+            {"cause": "节点磁盘/内存/CPU 不足", "verify": "节点监控", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "查看构建 Console Output 定位错误",
+                "command": "# Jenkins Web：构建页面 → Console Output\n# 或 curl 拉取（需登录）\ncurl -u <user>:<token> '<jenkins>/job/<job名>/<build号>/consoleText'",
+                "expected": "找到第一行 ERROR/FAIL 信息",
+                "judgment": "编译错误→修代码；依赖失败→检查网络和仓库；测试失败→看具体测试用例",
+            },
+            {
+                "action": "检查依赖/包下载是否成功",
+                "command": "# 在 Jenkins agent 上测试\ncurl -I https://<maven/nexus仓库>/<依赖路径>\n# 或\nnpm view <包名>@<版本>",
+                "expected": "依赖仓库可达，版本存在",
+                "judgment": "仓库不可达→检查网络和 DNS；版本不存在→检查版本号；私服需认证→检查 settings.xml",
+            },
+            {
+                "action": "检查 Jenkins 节点环境和工具",
+                "command": "# 在节点上执行\nwhich java mvn node npm docker git\njava -version\ndocker --version",
+                "expected": "所需工具和版本都符合项目要求",
+                "judgment": "工具缺失→安装；版本不对→切换节点或升级工具；PATH 不对→检查 Jenkins agent 配置",
+            },
+            {
+                "action": "检查凭据和权限",
+                "command": "# 测试 git 拉取\ngit clone https://<user>:<token>@<git仓库>.git\n# 测试镜像推送\ndocker login <registry> -u <user> -p <password>\ndocker push <镜像名>:<tag>",
+                "expected": "凭据有效，有对应权限",
+                "judgment": "凭据过期→更新；权限不足→联系管理员授权；SSH key 失效→重新配置",
+            },
+            {
+                "action": "检查 Jenkins agent 资源",
+                "command": "df -h\nfree -m\nnproc",
+                "expected": "磁盘、内存、CPU 充足",
+                "judgment": "资源不足→清理磁盘、扩容节点、限制并行构建数",
+            },
+        ],
+        "verify": "重新触发构建，Console Output 显示 SUCCESS。",
+        "rollback": "如果是 Pipeline 改动导致失败，回滚 Jenkinsfile 到上一版本：\ngit revert <commit>\n# 或手动还原 Jenkinsfile 后重新提交",
+    },
+    # ─────────────── 21. Docker 镜像拉取失败 ───────────────
+    {
+        "id": "docker-image-pull-failure",
+        "title": "Docker 镜像拉取失败排查",
+        "keywords": ["imagepullbackoff", "镜像拉取失败", "docker pull", "拉取镜像失败", "pull access denied", "镜像不存在", "image pull"],
+        "summary": "K8s pod 或 Docker 拉取镜像失败，ImagePullBackOff/ErrImagePull。常见原因：镜像不存在/tag 错误、镜像仓库需认证、网络不通、镜像架构不匹配。",
+        "root_causes": [
+            {"cause": "镜像名或 tag 拼写错误", "verify": "docker pull 测试", "probability": "高"},
+            {"cause": "镜像仓库需认证且未配置 secret", "verify": "kubectl get secret / docker login", "probability": "高"},
+            {"cause": "网络不通或 DNS 解析失败", "verify": "curl/telnet 仓库地址", "probability": "高"},
+            {"cause": "镜像不存在或已被删除", "verify": "仓库 Web 控制台或 API", "probability": "中"},
+            {"cause": "镜像架构不匹配", "verify": "docker manifest inspect", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "确认镜像拉取报错信息",
+                "command": "kubectl describe pod <pod名> -n <namespace> | grep -A10 Events\n# 或\ndocker pull <镜像名>:<tag>",
+                "expected": "看到具体错误：not found/forbidden/network/...",
+                "judgment": "根据错误类型定位：not found→镜像不存在；forbidden/unauthorized→认证问题；network→网络问题",
+            },
+            {
+                "action": "验证镜像名和 tag 是否正确",
+                "command": "# 在仓库 Web 控制台或 curl 查询\ncurl -s https://hub.docker.com/v2/repositories/<namespace>/<repo>/tags/<tag> | head\n# 或\ndocker pull <镜像名>:<tag> --platform linux/amd64",
+                "expected": "镜像和 tag 存在且可访问",
+                "judgment": "tag 不存在→用错 tag 或重新构建；镜像名写错→修正",
+            },
+            {
+                "action": "检查镜像仓库认证",
+                "command": "# Docker 本机\ndocker login <registry>\n# K8s\nkubectl get secret <imagePullSecrets> -n <namespace> -o yaml\nkubectl get serviceaccount default -n <namespace> -o yaml",
+                "expected": "凭据有效且已挂载到 pod/serviceaccount",
+                "judgment": "未登录→docker login；K8s 没 secret→创建 imagePullSecret 并绑定 serviceaccount",
+            },
+            {
+                "action": "测试网络连通性",
+                "command": "# 测试仓库域名解析和端口\nnslookup <registry域名>\ncurl -I https://<registry域名>\ntelnet <registry域名> 443",
+                "expected": "DNS 解析正常，443 端口通",
+                "judgment": "DNS 失败→排查 DNS；网络不通→检查防火墙/安全组/代理；HTTPS 证书不信任→配置 CA 或跳过 TLS 验证",
+            },
+            {
+                "action": "检查镜像架构是否匹配",
+                "command": "docker manifest inspect <镜像名>:<tag>\n# 或用 inspect 看 Architecture\ndocker inspect <镜像名>:<tag> --format='{{.Architecture}} {{.Os}}'",
+                "expected": "镜像架构与运行节点一致（如 amd64/arm64）",
+                "judgment": "架构不匹配→指定 --platform 重新构建或拉取对应架构镜像",
+            },
+        ],
+        "verify": "docker pull 成功，或 pod 重新创建后进入 Running。",
+        "rollback": "如果修改了镜像 tag/secret 导致更多 pod 失败：\n# 还原 deployment 镜像\nkubectl set image deployment/<name> <container>=<原镜像>:<原tag> -n <namespace>\n# 或回滚 deployment\nkubectl rollout undo deployment/<name> -n <namespace>",
+    },
+    # ─────────────── 22. CPU 使用率过高 ───────────────
+    {
+        "id": "high-cpu-usage",
+        "title": "CPU 使用率过高排查",
+        "keywords": ["cpu 高", "cpu 100%", "cpu 打满", "cpu 过高", "cpu usage", "load average", "cpu 占用"],
+        "summary": "服务器或 pod CPU 使用率长期偏高，导致服务响应慢。常见原因：某个进程死循环、批量任务、突发流量、SQL 慢查询、垃圾回收频繁。",
+        "root_causes": [
+            {"cause": "某个进程死循环或计算密集型任务", "verify": "top 看 CPU 占用最高进程", "probability": "高"},
+            {"cause": "突发流量或请求量激增", "verify": "监控 QPS/并发", "probability": "中"},
+            {"cause": "SQL 慢查询导致 CPU 高", "verify": "MySQL PROCESSLIST / 慢查询日志", "probability": "中"},
+            {"cause": "GC 频繁（Java/Go/Python）", "verify": "应用 GC 日志", "probability": "中"},
+            {"cause": "定时任务/批处理集中运行", "verify": "crontab/任务调度日志", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "定位高 CPU 进程",
+                "command": "top -bn1 -o %CPU | head -20\n# 或\nps -eo pid,ppid,%cpu,%mem,cmd --sort=-%cpu | head -20",
+                "expected": "找到 CPU 占用最高的 1-3 个进程",
+                "judgment": "单进程 CPU 高→进程内部问题；多进程/系统整体高→流量或资源不足",
+            },
+            {
+                "action": "定位进程内高 CPU 线程",
+                "command": "# 找出线程\nps -eLf -p <PID> | head -20\n# 看线程 CPU 排名\nps -eLo pid,tid,%cpu,comm --sort=-%cpu | head -20",
+                "expected": "定位到具体线程",
+                "judgment": "如果是 Java→jstack 看线程栈；Python→py-spy；Go→pprof；C/C++→perf",
+            },
+            {
+                "action": "检查是否为流量突发",
+                "command": "# Nginx/Ingress 访问日志\ntail -10000 /var/log/nginx/access.log | awk '{print $4}' | cut -d: -f2 | sort | uniq -c | sort -rn\n# 应用 QPS 监控",
+                "expected": "请求量是否明显高于平时",
+                "judgment": "流量突增→扩容/限流/降级；流量正常但 CPU 高→代码或 SQL 问题",
+            },
+            {
+                "action": "检查数据库/慢查询影响",
+                "command": "# MySQL\nSHOW PROCESSLIST;\nSHOW FULL PROCESSLIST;\n# 慢查询日志\ntail -n 100 /var/lib/mysql/slow.log",
+                "expected": "无大量慢查询或长事务",
+                "judgment": "慢查询多→优化索引/SQL；长事务→kill 或优化",
+            },
+            {
+                "action": "检查 GC 情况（Java/Go）",
+                "command": "# Java GC 日志\ntail -n 100 /path/to/gc.log\n# Go pprof\ngo tool pprof http://<app>:<port>/debug/pprof/profile",
+                "expected": "GC 频率正常，单次 GC 时间短",
+                "judgment": "GC 频繁→调大堆内存或优化对象分配；GC 时间长→优化代码或扩容",
+            },
+        ],
+        "verify": "CPU 使用率回落到正常水位，服务响应时间恢复。",
+        "rollback": "如果优化导致服务异常：\n# 回滚代码/配置\ngit revert <commit>\n# 或扩容后缩容\nkubectl scale deployment/<name> --replicas=<原副本数> -n <namespace>",
+    },
+    # ─────────────── 23. 日志目录磁盘满 ───────────────
+    {
+        "id": "log-disk-full",
+        "title": "日志目录磁盘满排查",
+        "keywords": ["日志目录满", "log 目录满", "日志磁盘满", "var log 满", "日志占满磁盘", "log disk full", "日志过大", "/var/log", "/var/log 满", "日志目录磁盘满"],
+        "summary": "日志目录（如 /var/log）占用磁盘空间过大，影响系统和服务正常运行。常见原因：日志未轮转、容器日志未限制、应用日志暴增、审计日志堆积。",
+        "root_causes": [
+            {"cause": "日志未配置轮转或轮转策略过松", "verify": "logrotate 配置", "probability": "高"},
+            {"cause": "容器日志无大小限制，持续增长", "verify": "Docker log 配置", "probability": "高"},
+            {"cause": "应用短时间内产生大量日志", "verify": "应用日志级别/报错", "probability": "中"},
+            {"cause": "审计/系统日志堆积", "verify": "journalctl / audit 日志", "probability": "中"},
+            {"cause": "日志清理脚本失效", "verify": "crontab / 清理脚本日志", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "定位哪个目录/文件占满磁盘",
+                "command": "df -h\ndu -sh /var/log/* | sort -rh | head -20\nfind /var/log -type f -size +100M -exec ls -lh {} \\;", 
+                "expected": "定位到最大的日志目录或文件",
+                "judgment": "单个文件大→轮转缺失；多个文件大→整体日志策略问题",
+            },
+            {
+                "action": "检查 logrotate 配置",
+                "command": "cat /etc/logrotate.conf\nls /etc/logrotate.d/\ncat /etc/logrotate.d/<对应服务>",
+                "expected": "日志配置了 daily/weekly + rotate + compress",
+                "judgment": "未配置 logrotate→添加；配置未生效→手动跑 logrotate -d 或 -f 测试",
+            },
+            {
+                "action": "限制容器日志大小（Docker）",
+                "command": "cat /etc/docker/daemon.json\n# 应有类似配置：\n# {\"log-driver\":\"json-file\",\"log-opts\":{\"max-size\":\"100m\",\"max-file\":\"3\"}}",
+                "expected": "Docker 日志有大小和文件数限制",
+                "judgment": "未限制→修改 daemon.json 后 systemctl restart docker；生产建议每个容器日志不超过 300MB",
+            },
+            {
+                "action": "检查应用日志级别和报错",
+                "command": "# 查看日志是否有异常高频报错\ntail -n 1000 /var/log/<应用>/<应用>.log | sort | uniq -c | sort -rn | head -10",
+                "expected": "日志级别合理，无异常高频错误",
+                "judgment": "ERROR 级别日志暴增→定位并修复根因；日志级别过低→调高到 WARN/INFO",
+            },
+            {
+                "action": "安全清理旧日志并释放空间",
+                "command": "# 清理 7 天前日志\nfind /var/log -type f -name '*.log.*' -mtime +7 -delete\n# 截断当前大日志（不影响写入）\ntruncate -s 0 /var/log/<大文件>.log\n# 限制 journal 大小\njournalctl --vacuum-size=500M",
+                "expected": "df -h 显示磁盘空间释放",
+                "judgment": "清理前先确认日志已备份或已轮转；不要删除运行中服务的主日志文件，用 truncate",
+            },
+        ],
+        "verify": "df -h 显示日志目录使用率 <80%，且有自动轮转机制。",
+        "rollback": "清理操作不可逆。如果误删了关键日志：\n# 如果有备份则恢复\n# 否则只能等待新的日志产生\n# 建议：清理前对大日志文件做 tar 备份",
+    },
 ]
+
+
+
 
 
 def list_runbooks():

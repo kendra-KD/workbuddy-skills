@@ -2,8 +2,8 @@
 name: ops-fault-runbook
 slug: ops-fault-runbook
 displayName: 运维故障 Runbook 生成器
-version: 1.1.1
-description: "运维故障 Runbook 生成器。输入故障特征（如 502/503/504/timeout/DNS解析失败/数据库连接失败/证书过期/pod crashloopbackoff/pod pending/MinIO S3 500/磁盘满/OOM/Docker容器无法启动/Nginx配置错误），自动匹配预置实战 runbook，输出结构化排查步骤+验证命令+回退方案+根因假设。未匹配时推荐最接近的 runbook 并给出通用排查框架。触发短语：'故障排查'、'runbook'、'排查步骤'、'怎么排查'、'故障处理流程'、'troubleshoot runbook'、'incident playbook'、'生成排查手册'。面向运维工程师、SRE、技术支持、私有化交付。纯规则引擎，不调 AI API，零成本零延迟。本 Skill 是运维全生命周期四件套之一（预防→发现→上报→解决）。"
+version: 1.2.0
+description: "运维故障 Runbook 生成器。输入故障特征（如 502/503/504/timeout/DNS解析失败/数据库连接失败/证书过期/pod crashloopbackoff/pod pending/MinIO S3 500/磁盘满/OOM/Docker容器无法启动/Nginx配置错误/K8s节点NotReady/MySQL慢查询/Redis内存满/Ingress不通/Jenkins构建失败/镜像拉取失败/CPU过高/日志目录满），自动匹配预置实战 runbook，输出结构化排查步骤+验证命令+回退方案+根因假设。未匹配时推荐最接近的 runbook 并给出通用排查框架。触发短语：'故障排查'、'runbook'、'排查步骤'、'怎么排查'、'故障处理流程'、'troubleshoot runbook'、'incident playbook'、'生成排查手册'。面向运维工程师、SRE、技术支持、私有化交付。纯规则引擎，不调 AI API，零成本零延迟。本 Skill 是运维全生命周期四件套之一（预防→发现→上报→解决）。"
 agent_created: true
 ---
 
@@ -82,7 +82,7 @@ WorkBuddy 识别到「crashloopbackoff」「排查」触发本 Skill，内部匹
 
 > **你说**：runbook 列表 / 都有哪些排查手册
 
-输出全部 15 个内置 runbook 的清单（ID + 故障类型 + 关键词），你看到接近的再用 `--detail <id>` 或直接描述现象触发。
+输出全部 23 个内置 runbook 的清单（ID + 故障类型 + 关键词），你看到接近的再用 `--detail <id>` 或直接描述现象触发。
 
 ### 场景 5 · 新人学习常见故障排查流程
 
@@ -97,7 +97,7 @@ WorkBuddy 识别到「crashloopbackoff」「排查」触发本 Skill，内部匹
 ### Step 1 · 识别故障特征
 
 用户提供故障关键词或描述。支持两种输入：
-- **关键词**：`502`、`503`、`timeout`、`证书过期`、`pod crashloopbackoff`、`OOM`、`磁盘满`、`connection refused`、`MinIO 500`
+- **关键词**：`502`、`503`、`timeout`、`证书过期`、`pod crashloopbackoff`、`OOM`、`磁盘满`、`connection refused`、`MinIO 500`、`node notready`、`mysql 慢查询`、`redis 内存满`、`ingress 不通`、`jenkins 构建失败`、`镜像拉取失败`、`CPU 高`、`日志目录满`
 - **自然语言**：`生产环境 502 了`、`有个 pod 一直 crashloopbackoff`、`证书快过期了怎么处理`
 
 ### Step 2 · 匹配预置 Runbook
@@ -149,6 +149,14 @@ python scripts/runbook_matcher.py --detail http-502
 | `pod-pending` | K8s Pod Pending | pod pending、调度失败、unschedulable |
 | `docker-container-start-failure` | Docker 容器无法启动 | docker 启动失败、容器启动即退出、exited immediately |
 | `nginx-config-error` | Nginx 配置语法错误 | nginx -t、syntax error、nginx reload、nginx 配置 |
+| `k8s-node-notready` | K8s 节点 NotReady | node notready、notready、节点异常 |
+| `mysql-slow-query` | MySQL 慢查询 | mysql 慢查询、slow query、慢 sql、查询慢 |
+| `redis-memory-full` | Redis 内存满/OOM | redis 内存满、redis oom、memory full、maxmemory |
+| `ingress-not-working` | K8s Ingress 访问不通 | ingress、ingress 访问不到、域名访问不到 |
+| `jenkins-build-failure` | Jenkins 构建失败 | jenkins、构建失败、build failed、pipeline 失败 |
+| `docker-image-pull-failure` | Docker 镜像拉取失败 | imagepullbackoff、镜像拉取失败、docker pull |
+| `high-cpu-usage` | CPU 使用率过高 | cpu 高、cpu 100%、cpu 打满、cpu 占用 |
+| `log-disk-full` | 日志目录磁盘满 | 日志目录满、log 目录满、var log 满、日志过大 |
 
 ## 输出格式
 
