@@ -1,0 +1,5 @@
+﻿# 域名清单模板
+# 一行一个域名，用于 ssl-cert-match 审计项
+example.com
+www.example.com
+api.example.com

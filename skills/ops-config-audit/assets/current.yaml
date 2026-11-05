@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: production
+data:
+  log_level: "info"
+  max_connections: "100"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secret
+  namespace: production
+data:
+  password: c2VjcmV0
