@@ -28,3 +28,8 @@ redis-cache-rdb,local-file,/var/lib/redis/dump.rdb,redis.example.com,,redis,1,24
 nginx-conf-bk,local-file,/data/backups/nginx-conf.tar.gz,web1.example.com,,,0.001,168,
 daily-backup-bucket,minio-s3,s3://daily-backups/,,,,,24,1
 core-configmap,k8s-resource,configmap/core-config,,enableai,,,0,0,
+k8s-etcd-snapshot,local-file,/data/backups/etcd/snapshot.db,master1.example.com,,,10,24,
+tls-cert-secret,k8s-resource,secret/reredata-tls,,enableai,,,0,0,
+mysql-pv-snapshot,k8s-resource,volumesnapshot/mysql-daily,,enableai,,,24,
+mongo-main-dump,local-file,/data/backups/mongo/main.gz,mongo1.example.com,,,10,24,
+ch-events-backup,local-file,/var/lib/clickhouse-backup/events.zip,ch1.example.com,,,50,24,

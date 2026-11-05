@@ -43,3 +43,35 @@
 ### 待观察
 - 大批量目标（50+）的性能未测——当前串行 + 15 秒超时，50 目标最坏 750 秒。后续若反馈慢再考虑并发。
 - mc JSON 输出格式跨版本兼容性未测——MinIO mc 不同版本 JSON 字段名可能差异（lastModified vs time），脚本已兼容两者。
+
+---
+
+## #002 · 2026-11-05 · v1.1 扩模板（数据驱动升级）
+
+### 触发场景
+backup-checker 在 SkillHub 下载数据中增速最快（11-03→11-05 两天从 5 涨到 13，+160%），是四件套里增长最猛的。验证了 v1.0 判断"预防方向需求存在但被低估"——之前下载少是因为发布晚+曝光少，不是需求弱。决定做 v1.1 扩模板顺势放大增速，而非做新 skill。
+
+### 方案选择
+- **扩 5 个模板（5→10）**：etcd-snapshot / k8s-configmap-secret / k8s-volumesnapshot / mongodb-dump / clickhouse-backup
+- **覆盖方向**：K8s 集群核心（etcd/ConfigMap/PV 快照）+ MongoDB + ClickHouse，补全云原生全栈
+- **不改核心代码**：新增 5 模板全部复用已有 local-file / k8s-resource 检查器，只补 references 文档 + CSV 示例 + SKILL.md 模板清单表
+- **体验优化 3 项**：SKILL.md 模板清单表扩 10 行 + description 模板数量改 10 + CSV 模板补 5 行示例
+
+### 关键决策
+1. **v1.1 不改脚本逻辑**：跟 runbook v1.1 不同，backup-checker 的模板本质是 CSV 配置参数化（Rule: CSV 参数化模板），新增模板不需要改 check_backups.py，风险更低工作量更小。
+2. **etcd-snapshot 是最高价值新增**：K8s 集群 etcd 备份是集群恢复底线，丢了等于整个集群状态丢失，但市面通用备份检查工具很少覆盖。这是差异化卖点。
+3. **k8s-configmap-secret 利用已有 check_k8s_resource 代码**：v1.0 代码已支持 k8s-resource 类型，只是模板库没列出来。v1.1 补模板文档等于"激活"已有能力。
+4. **clickhouse-backup 阈值高于其他数据库**（50MB vs 10MB）：ClickHouse 列存数据量大，沿用 mysql/mongo 的 10MB 阈值会误报，按实际数据特征调整。
+
+### 踩坑记录
+| # | 问题 | 根因 | 修复 |
+|---|------|------|------|
+| 1 | CSV 文件首行有 BOM（﻿） | init_skill 脚手架生成时编码 | 追加示例行时保留原行不动，不重新生成文件 |
+
+### 可复用经验
+1. **数据驱动迭代的优先级判断**：增速最快的 skill 优先做深度迭代（扩模板/体验优化），比做新 skill 投入产出比高。backup-checker +160% 增速 → 优先于新 skill。
+2. **模板扩容不改代码的条件**：当模板本质是 CSV 参数化配置时，扩模板只需改文档+CSV 示例，不碰脚本。判断标准：新增模板是否复用已有 type 检查器。
+
+### 待观察
+- v1.1 发布后 download 增速是否进一步加快（验证"扩模板→更多下载"假设）
+- 新增的 etcd-snapshot 模板是否成为差异化卖点（市面通用工具少覆盖）

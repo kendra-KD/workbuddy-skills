@@ -2,8 +2,8 @@
 name: ops-backup-checker
 slug: ops-backup-checker
 displayName: 备份健康巡检器
-version: 1.0.1
-description: "备份健康巡检工具。批量检查服务器本地备份文件、MinIO/S3 对象存储备份、数据库备份状态（MySQL dump/PG dump/Redis RDB）、K8s 资源备份（ConfigMap/Secret/PV），验证文件存在/大小/时间戳是否符合预期，按健康度（缺失/过期/异常小/正常）排序生成 Markdown 报告与 JSON 数据。内置 5 类常见备份检查模板。触发短语：'备份检查'、'备份巡检'、'备份健康'、'验证备份'、'backup health'、'backup checker'、'备份是否正常'。面向运维、SRE、DBA、私有化交付。只读不写，不执行备份，不存储备份内容。纯 Python 标准库 + mc/aws-cli/ssh，零第三方依赖。"
+version: 1.1.0
+description: "备份健康巡检工具。批量检查服务器本地备份文件、MinIO/S3 对象存储备份、数据库备份状态（MySQL dump/PG dump/Redis RDB/MongoDB dump）、K8s 资源备份（ConfigMap/Secret/PV 快照/etcd 快照），验证文件存在/大小/时间戳是否符合预期，按健康度（缺失/过期/异常小/正常）排序生成 Markdown 报告与 JSON 数据。内置 10 类常见备份检查模板。触发短语：'备份检查'、'备份巡检'、'备份健康'、'验证备份'、'backup health'、'backup checker'、'备份是否正常'。面向运维、SRE、DBA、私有化交付。只读不写，不执行备份，不存储备份内容。纯 Python 标准库 + mc/aws-cli/ssh，零第三方依赖。"
 agent_created: true
 ---
 
@@ -11,7 +11,7 @@ agent_created: true
 
 ## Overview
 
-批量检查运维环境中的备份健康度——服务器本地备份文件、MinIO/S3 对象存储备份、数据库备份状态、K8s 资源备份，验证文件存在性、大小合理性、时间戳新鲜度，按健康度排序输出 Markdown 报告与 JSON 数据，并内置 5 类常见备份的检查模板。面向任何运维备份场景，不绑定特定云厂商或公司。**只读不写，不执行备份，不存储备份内容**。
+批量检查运维环境中的备份健康度——服务器本地备份文件、MinIO/S3 对象存储备份、数据库备份状态、K8s 资源备份，验证文件存在性、大小合理性、时间戳新鲜度，按健康度排序输出 Markdown 报告与 JSON 数据，并内置 10 类常见备份的检查模板。面向任何运维备份场景，不绑定特定云厂商或公司。**只读不写，不执行备份，不存储备份内容**。
 
 **解决什么痛点**：运维最怕的不是"没备份"，而是"以为备份了，真出事才发现备份是坏的/过期的/路径错的/大小异常的"。手动 SSH 一台台翻备份目录既慢又容易漏，且没法标准化巡检。这个 Skill 把备份巡检标准化：一份 CSV 巡检清单进去，一份按健康度排序的巡检报告出来，30 秒扫完所有备份目标，任何环境都能跑。
 
@@ -19,7 +19,7 @@ agent_created: true
 1. **多目标检查**：支持本地文件系统备份（SSH 拉取元信息）、MinIO/S3 对象存储备份（mc/aws-cli CLI）、数据库备份状态（MySQL/PG dump 文件）、K8s 资源备份（kubectl 导出 YAML）
 2. **健康度分级**：🔴缺失（备份不存在）/ 🟡过期（时间戳超期）/ 🟠异常（大小异常小，疑似空备份）/ 🟢正常，按严重度排序输出
 3. **双输出格式**：Markdown 表格报告（人类阅读，可直接复制到企业微信/钉钉）+ JSON 结构化数据（程序化消费，便于接入告警/知识库）
-4. **5 类内置模板**：MySQL dump / PG dump / Redis RDB / Nginx config tar / MinIO bucket，开箱即用，覆盖运维最常见备份类型
+4. **10 类内置模板**：MySQL dump / PG dump / Redis RDB / Nginx config tar / MinIO bucket / etcd snapshot / K8s ConfigMap-Secret / K8s VolumeSnapshot / MongoDB dump / ClickHouse backup，开箱即用，覆盖数据库+配置+对象存储+K8s 全栈备份场景
 5. **零环境依赖**：纯 Python 标准库（os/stat/json/csv/datetime/subprocess），远程拉取调 mc/aws-cli/ssh，不引入第三方 Python 包
 
 **适用场景**：
@@ -159,7 +159,9 @@ cat check_result.json
 
 ## 内置备份检查模板
 
-5 类开箱即用的检查模板，覆盖运维最常见备份类型。详见 `references/backup_templates.md`。
+10 类开箱即用的检查模板，覆盖运维最常见备份类型。详见 `references/backup_templates.md`。
+
+> v1.1 扩展至 10 类（2026-11-05），基于下载数据驱动（backup-checker 增速最快 +160%），新增 K8s 集群核心（etcd/ConfigMap/PV 快照）+ MongoDB + ClickHouse，覆盖云原生全栈备份场景。
 
 | 模板 ID | 备份类型 | 检查要点 | 默认阈值 |
 |---------|---------|---------|---------|
@@ -168,6 +170,11 @@ cat check_result.json
 | `redis-rdb` | Redis RDB 快照 | dump.rdb 文件存在 + 大小 ≥ 1MB + 24h 内更新 | min_size=1MB, max_age=24h |
 | `nginx-config-tar` | Nginx 配置打包备份 | .tar.gz 存在 + 大小 ≥ 1KB + 168h(7天) 内更新 | min_size=1KB, max_age=168h |
 | `minio-bucket` | MinIO/S3 桶备份 | 桶内最新对象时间戳 + 对象数量 ≥ 1 | max_age=24h |
+| `etcd-snapshot` | K8s etcd 快照（v1.1新增） | .db 文件存在 + 大小 ≥ 10MB + 24h 内更新 | min_size=10MB, max_age=24h |
+| `k8s-configmap-secret` | K8s ConfigMap/Secret（v1.1新增） | 资源存在性巡检（防误删） | max_age=0(不查年龄) |
+| `k8s-volumesnapshot` | K8s PV 卷快照（v1.1新增） | VolumeSnapshot 资源存在 + 24h 内创建 | max_age=24h |
+| `mongodb-dump` | MongoDB 逻辑备份（v1.1新增） | .gz 归档存在 + 大小 ≥ 10MB + 24h 内更新 | min_size=10MB, max_age=24h |
+| `clickhouse-backup` | ClickHouse 备份（v1.1新增） | .zip 归档存在 + 大小 ≥ 50MB + 24h 内更新 | min_size=50MB, max_age=24h |
 
 ---
 
