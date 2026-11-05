@@ -53,11 +53,11 @@ agent_created: true
 
 > **你说**：帮我做一下证书巡检 / 检查证书到期情况
 
-如果你有 CSV 域名清单（放在 `assets/domains_template.csv`），批量检查所有域名；如果没有，你直接在对话里列出域名（如 `reredata.com`、`blog.example.com:8443`），Skill 解析后检查，输出按紧急度排序的报告。
+如果你有 CSV 域名清单（放在 `assets/domains_template.csv`），批量检查所有域名；如果没有，你直接在对话里列出域名（如 `example.com`、`blog.example.com:8443`），Skill 解析后检查，输出按紧急度排序的报告。
 
 #### 场景 2 · 临时查单个域名
 
-> **你说**：检查 reredata.com 的证书还有多久过期
+> **你说**：检查 example.com 的证书还有多久过期
 
 单个域名检查，立即出结果（紧急/警告/正常/已过期）。
 
@@ -78,7 +78,7 @@ agent_created: true
 从以下两种输入之一获取待检查的域名清单：
 
 - **CSV 文件**：读取 `assets/domains_template.csv` 格式的清单（字段：`domain,port`，默认端口 443）。适合批量盘点、可版本化复用。
-- **对话临时输入**：用户在对话中直接列出域名（如 `reredata.com`、`blog.example.com:8443`），解析后传给检查脚本。适合临时排查。
+- **对话临时输入**：用户在对话中直接列出域名（如 `example.com`、`blog.example.com:8443`），解析后传给检查脚本。适合临时排查。
 
 若用户未指定端口，默认使用 443。
 
@@ -132,7 +132,7 @@ python scripts/generate_report.py --input check_result.json --output cert_report
 # 报告输出到 cert_report.md
 
 # 方式二：对话临时输入（适合临时排查单个/几个域名）
-# 直接在对话里说"检查 reredata.com、blog.example.com:8443 的证书到期情况"
+# 直接在对话里说"检查 example.com、blog.example.com:8443 的证书到期情况"
 
 # 方式三：只看 JSON 结构化数据（便于接入告警系统）
 cat check_result.json

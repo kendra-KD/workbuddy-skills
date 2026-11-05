@@ -267,7 +267,7 @@ def check_k8s_resource(target):
     Uses kubectl get <resource> <name> -o yaml to confirm resource exists.
     This checks resource existence, not a backup file per se.
     """
-    resource = target["path"]  # e.g. configmap/core-config
+    resource = target["path"]  # e.g. configmap/app-config
     namespace = target.get("namespace", "")
     kubeconfig = os.environ.get("KUBECONFIG", "")
 

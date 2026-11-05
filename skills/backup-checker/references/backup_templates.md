@@ -164,12 +164,12 @@ k8s-etcd-snapshot,local-file,/data/backups/etcd/snapshot.db,master1.example.com,
 **CSV 配置示例**：
 ```csv
 name,type,path,namespace,expected_max_age_hours
-tls-cert-secret,k8s-resource,secret/reredata-tls,enableai,0
-core-configmap,k8s-resource,configmap/core-config,enableai,0
-minio-config,k8s-resource,configmap/minio-config,wuwen,0
+tls-cert-secret,k8s-resource,secret/tls-cert,production,0
+app-configmap,k8s-resource,configmap/app-config,production,0
+cache-config,k8s-resource,configmap/cache-config,default,0
 ```
 
-**注意**：path 格式为 `resource_type/resource_name`（如 `configmap/core-config`、`secret/tls-cert`）。namespace 必填。资源年龄默认不检查（配置类资源可长期不变）。
+**注意**：path 格式为 `resource_type/resource_name`（如 `configmap/app-config`、`secret/tls-cert`）。namespace 必填。资源年龄默认不检查（配置类资源可长期不变）。
 
 ---
 
@@ -189,8 +189,8 @@ minio-config,k8s-resource,configmap/minio-config,wuwen,0
 **CSV 配置示例**：
 ```csv
 name,type,path,namespace,expected_max_age_hours
-mysql-pv-snapshot,k8s-resource,volumesnapshot/mysql-daily,enableai,24
-redis-pv-snapshot,k8s-resource,volumesnapshot/redis-daily,wuwen,24
+mysql-pv-snapshot,k8s-resource,volumesnapshot/mysql-daily,production,24
+redis-pv-snapshot,k8s-resource,volumesnapshot/redis-daily,default,24
 ```
 
 **注意**：path 格式为 `volumesnapshot/<snapshot-name>`。需集群已安装 VolumeSnapshotClass（CSI 驱动支持）。

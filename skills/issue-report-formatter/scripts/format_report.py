@@ -29,16 +29,17 @@ from datetime import datetime, timezone, timedelta
 # ============================================================
 
 # 已知客户名（可扩展）——匹配到这些词时优先识别为客户名
+# 注意：此处只放通用占位示例，不预设任何真实客户名。
+# 实际使用时由用户在对话中提供，或通过"客户XX""XX项目"模式抽取。
 KNOWN_CUSTOMERS = [
-    "字节跳动", "江西铜业", "七天网络", "浙江白马",
-    "汇洲智能", "五环绿能", "EnableAI", "enableai",
+    "客户A", "客户B", "客户C",  # 占位示例，实际由对话上下文决定
 ]
 
 # 环境/节点匹配模式
 NODE_PATTERNS = [
     r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d+))?\b',          # IP[:端口]
-    r'\b(qm-prod|qm-admin|qm-core|minio\d*|minio-nginx)\b',            # 已知主机名
-    r'\b(enableai|wuwen|kube-system|default)\b\s*(?:namespace)?',     # K8s namespace
+    r'\b(prod|test|dev|staging|web\d*|app\d*|db\d*|cache\d*)\b',      # 通用主机名
+    r'\b(production|default|kube-system|monitoring)\b\s*(?:namespace)?',  # 通用 namespace
     r'(?:(生产|测试|开发|预发|staging|prod|test|dev)[环境]?)',         # 环境名
 ]
 
@@ -46,7 +47,7 @@ NODE_PATTERNS = [
 ERROR_PATTERNS = [
     r'(?:返回|响应|状态码|HTTP)\s*[:：]?\s*(\d{3})\s*(.+?)?(?=[，。；,;]|$)',
     r'(HTTP/\d(?:\.\d)?\s+\d{3}\s+.+)',
-    r'((?:core_unreachable|connection refused|timeout|超时|宕机|不可用|502|503|504|500|404|403|401)\b[^，。；,;\n]{0,80})',
+    r'((?:service_unavailable|connection refused|timeout|超时|宕机|不可用|502|503|504|500|404|403|401)\b[^，。；,;\n]{0,80})',
     r'((?:Error|Exception|Failed|Traceback)[:：]?\s*.+)',
 ]
 
@@ -98,8 +99,8 @@ def extract_node(text: str) -> str:
                     parts.append(node)
             break
     # 主机名/namespace
-    for pattern in [r'\b(qm-prod|qm-admin|qm-core|minio\d*|minio-nginx)\b',
-                    r'\b(enableai|wuwen|kube-system)\b']:
+    for pattern in [r'\b(prod|test|dev|staging|web\d*|app\d*|db\d*)\b',
+                    r'\b(production|default|kube-system|monitoring)\b']:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for m in matches:
             if m.lower() not in [p.lower() for p in parts]:
@@ -187,7 +188,7 @@ def classify_severity(fields: dict) -> tuple:
     text = " ".join(str(v) for v in fields.values()).lower()
 
     # 紧急关键词
-    urgent_keywords = ["502", "503", "504", "500", "宕机", "不可用", "core_unreachable",
+    urgent_keywords = ["502", "503", "504", "500", "宕机", "不可用", "service_unavailable",
                        "connection refused", "超时", "timeout", "数据丢失", "生产", "prod"]
     important_keywords = ["404", "403", "401", "异常", "失败", "报错", "error", "failed"]
     normal_keywords = ["咨询", "建议", "优化", "文档", "问题", "请问"]
@@ -218,7 +219,7 @@ def generate_suggestions(fields: dict) -> list:
     error = fields.get("error", "").lower()
     node = fields.get("environment", "")
 
-    if "502" in error or "core_unreachable" in error:
+    if "502" in error or "service_unavailable" in error:
         suggestions.append("检查上游服务是否真的起来（netstat -tlnp / ss -tlnp）")
         suggestions.append("检查下游到上游的网络连通性（curl/ping）")
         suggestions.append("查看上游服务日志最近的 ERROR/Exception")
@@ -319,10 +320,10 @@ def main():
         epilog="""
 使用示例：
   # 对话式：从自然语言抽取
-  echo "qm-prod 上 qm-admin 8090 的 /api/whoami 返回 502 core_unreachable，core 服务位于 8080，已试过重启 core" | python format_report.py --mode extract
+  echo "prod-server 上 app-service 8090 的 /api/health 返回 502 service_unavailable，core 服务位于 8080，已试过重启 core" | python format_report.py --mode extract
 
   # 表单式：逐字段提供
-  python format_report.py --mode format --customer "浙江白马" --env "生产/172.22.1.22" --error "502 core_unreachable" --tried "重启 core"
+  python format_report.py --mode format --customer "客户A" --env "生产/10.0.1.5" --error "502 service_unavailable" --tried "重启 core"
 
   # 输出 JSON 到文件
   python format_report.py --mode extract --json report.json

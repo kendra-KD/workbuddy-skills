@@ -7,7 +7,7 @@ Severity Classifier · 紧急度分级独立工具
 读取一段故障描述，输出紧急度级别 + 分级依据。
 
 使用示例：
-  echo "生产环境 qm-admin 502 core_unreachable" | python classify_severity.py
+  echo "生产环境 app-service 502 service_unavailable" | python classify_severity.py
   python classify_severity.py --text "测试环境 404 not found"
 """
 
@@ -19,7 +19,7 @@ import sys
 # 紧急关键词（权重高）
 URGENT_KEYWORDS = [
     "502", "503", "504", "500",
-    "宕机", "不可用", "core_unreachable",
+    "宕机", "不可用", "service_unavailable",
     "connection refused", "timeout", "超时",
     "数据丢失", "数据损坏", "oom", "killed",
 ]

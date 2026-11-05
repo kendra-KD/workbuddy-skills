@@ -12,7 +12,7 @@ AI Prompt Generator · AI 协作提示词生成器
 
 使用示例：
   # 从 stdin 读 JSON
-  echo '{"customer":"浙江白马","environment":"生产/172.22.1.22","error":"502 core_unreachable","tried":"重启 core","reproduce":"curl /api/whoami"}' | python generate_ai_prompt.py
+  echo '{"customer":"客户A","environment":"生产/10.0.1.5","error":"502 service_unavailable","tried":"重启 core","reproduce":"curl /api/health"}' | python generate_ai_prompt.py
 
   # 独立测试（内置示例）
   python generate_ai_prompt.py --demo
@@ -34,7 +34,7 @@ def generate_checklist(fields: dict) -> list:
     env = fields.get("environment") or ""
     checklist = []
 
-    if "502" in error or "core_unreachable" in error:
+    if "502" in error or "service_unavailable" in error:
         checklist = [
             {"item": "上游服务是否在监听", "how": "检查目标端口是否 LISTEN", "cmd": "ss -tlnp | grep <port> 或 netstat -tlnp | grep <port>"},
             {"item": "服务进程是否存活", "how": "确认进程在运行且未僵尸", "cmd": "ps aux | grep <service> 或 systemctl status <service>"},
@@ -113,7 +113,7 @@ def generate_hypothesis_tree(fields: dict) -> list:
     error = (fields.get("error") or "").lower()
     hypotheses = []
 
-    if "502" in error or "core_unreachable" in error:
+    if "502" in error or "service_unavailable" in error:
         hypotheses = [
             {
                 "hypothesis": "上游服务没起来或崩了",
@@ -271,11 +271,11 @@ def generate_assist_output(fields: dict, severity_label: str = "") -> str:
 # ============================================================
 
 DEMO_FIELDS = {
-    "customer": "浙江白马",
-    "environment": "生产 / 172.22.1.22 / enableai",
-    "error": "qm-admin 8090 /api/whoami 返回 502 core_unreachable",
+    "customer": "客户A",
+    "environment": "生产 / 10.0.1.5 / production",
+    "error": "app-service 8090 /api/health 返回 502 service_unavailable",
     "tried": "重启 core 服务 8080，问题未解决",
-    "reproduce": "curl http://172.22.1.22:8090/api/whoami → 502",
+    "reproduce": "curl http://10.0.1.5:8090/api/health → 502",
 }
 
 
@@ -289,7 +289,7 @@ def main():
   cat report.json | python generate_ai_prompt.py
 
   # 直接传 JSON 字符串
-  python generate_ai_prompt.py --json-input '{"customer":"浙江白马","error":"502"}'
+  python generate_ai_prompt.py --json-input '{"customer":"客户A","error":"502"}'
 
   # 内置示例（快速看效果）
   python generate_ai_prompt.py --demo

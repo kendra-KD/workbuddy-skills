@@ -7,7 +7,7 @@
 #   path                      : 备份路径（必填）
 #                               - local-file/database : 文件绝对路径，如 /data/backups/db1.sql.gz
 #                               - minio-s3            : s3://bucket/prefix/
-#                               - k8s-resource        : resource/name，如 configmap/core-config
+#                               - k8s-resource        : resource/name，如 configmap/app-config
 #   host                      : 远程主机（可选，默认 localhost；local-file/database 远程时填 SSH host）
 #                               - minio-s3            : 可填自定义 endpoint（配合 BACKUP_CHECKER_S3_ENDPOINT）
 #   namespace                 : K8s 命名空间（仅 k8s-resource 用）
@@ -27,9 +27,9 @@ pg-main-dump,local-file,/var/backups/pg/main.dump,pg.example.com,,postgres,5,24,
 redis-cache-rdb,local-file,/var/lib/redis/dump.rdb,redis.example.com,,redis,1,24,
 nginx-conf-bk,local-file,/data/backups/nginx-conf.tar.gz,web1.example.com,,,0.001,168,
 daily-backup-bucket,minio-s3,s3://daily-backups/,,,,,24,1
-core-configmap,k8s-resource,configmap/core-config,,enableai,,,0,0,
+app-configmap,k8s-resource,configmap/app-config,,production,,,0,0,
 k8s-etcd-snapshot,local-file,/data/backups/etcd/snapshot.db,master1.example.com,,,10,24,
-tls-cert-secret,k8s-resource,secret/reredata-tls,,enableai,,,0,0,
-mysql-pv-snapshot,k8s-resource,volumesnapshot/mysql-daily,,enableai,,,24,
+tls-cert-secret,k8s-resource,secret/tls-cert,,production,,,0,0,
+mysql-pv-snapshot,k8s-resource,volumesnapshot/mysql-daily,,production,,,24,
 mongo-main-dump,local-file,/data/backups/mongo/main.gz,mongo1.example.com,,,10,24,
 ch-events-backup,local-file,/var/lib/clickhouse-backup/events.zip,ch1.example.com,,,50,24,

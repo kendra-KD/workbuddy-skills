@@ -108,7 +108,7 @@ export KUBECONFIG=/path/to/kubeconfig
 
 **测试**：
 ```bash
-kubectl get configmap core-config -n enableai -o json --ignore-not-found
+kubectl get configmap app-config -n production -o json --ignore-not-found
 ```
 
 ---

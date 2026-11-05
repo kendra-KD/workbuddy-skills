@@ -74,7 +74,7 @@ WorkBuddy 识别到「备份巡检」「备份是否正常」触发本 Skill。�
 
 ### 场景 3 · 接手新环境盘点
 
-接手浙江白马这种私有化交付环境，第一件事摸清备份现状：
+接手新环境或私有化交付时，第一件事摸清备份现状：
 
 > **你说**：盘点一下这个环境的备份情况 / 备份健康检查
 
@@ -152,7 +152,7 @@ cat check_result.json
 |------|------|------|------|---------|--------|------|
 | db1-mysql-dump | local-file | /data/backups/db1.sql.gz | 0 MB | 2026-10-20 | 🟠 异常 | 大小低于阈值 10MB |
 | minio-bucket-bk | minio-s3 | s3://backups/daily/ | 256 MB | 2026-10-31 | 🟢 正常 | - |
-| core-configmap | k8s-resource | enableai/core-config | - | 2026-10-31 | 🟢 正常 | - |
+| app-configmap | k8s-resource | production/app-config | - | 2026-10-31 | 🟢 正常 | - |
 ```
 
 ---

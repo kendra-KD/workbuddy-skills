@@ -53,7 +53,7 @@ agent_created: true
 
 碰到问题时，直接把零散的描述丢给对话：
 
-> **你说**：帮我做个问题上报。qm-prod 上 qm-admin 8090 的 /api/whoami 返回 502 core_unreachable，已经重启过 core 服务 8080 但没解决
+> **你说**：帮我做个问题上报。prod-server 上 app-service 8090 的 /api/health 返回 502 service_unavailable，已经重启过 core 服务 8080 但没解决
 
 Skill 自动抽取关键字段（客户名/环境/报错/已试操作），生成结构化上报报告 + 紧急度分级，可直接复制到企业微信/钉钉发给 leader 或同事。
 
@@ -65,13 +65,13 @@ Skill 自动抽取关键字段（客户名/环境/报错/已试操作），生�
 
 #### 场景 3 · 客户报障转交研发
 
-> **你说**：报障。客户浙江白马，生产环境 172.22.1.22，报错 SAM 推理 500，已试过重启 minio
+> **你说**：报障。客户A，生产环境 10.0.1.5，报错推理服务 500，已试过重启 minio
 
 生成标准报告，附客户名/环境/报错/已试操作，转交给研发时信息完整不用反复追问。
 
 #### 场景 4 · 逐字段表单式上报
 
-> **你说**：问题上报。客户名：浙江白马；环境：生产；节点：172.22.1.22；报错：SAM 500；已试操作：重启 minio
+> **你说**：问题上报。客户名：客户A；环境：生产；节点：10.0.1.5；报错：推理服务 500；已试操作：重启 minio
 
 逐字段提供，直接格式化输出，缺失字段标记 `[待补充]`。
 
@@ -80,8 +80,8 @@ Skill 自动抽取关键字段（客户名/环境/报错/已试操作），生�
 #### Step 1 · 判断输入模式
 
 读取用户输入，判断是"对话式""表单式"还是"AI 协作式"：
-- **对话式**：用户用自然语言描述了一段故障（如"qm-prod 上 qm-admin 8090 的 /api/whoami 返回 502 core_unreachable"）→ 走 Step 2A
-- **表单式**：用户明确逐字段提供（如"客户名：浙江白马，环境：生产，节点：172.22.1.22..."）→ 走 Step 2B
+- **对话式**：用户用自然语言描述了一段故障（如"prod-server 上 app-service 8090 的 /api/health 返回 502 service_unavailable"）→ 走 Step 2A
+- **表单式**：用户明确逐字段提供（如"客户名：客户A，环境：生产，节点：10.0.1.5..."）→ 走 Step 2B
 - **AI 协作式**：用户说"整理给 AI 排查""同步给 AI""让 AI 帮我查"等 → 走 Step 2A + Step 6
 - **模糊**：用户只说"帮我做个问题上报"但没给详情 → 主动询问关键字段
 
@@ -91,11 +91,11 @@ Skill 自动抽取关键字段（客户名/环境/报错/已试操作），生�
 
 | 字段 | 抽取规则 | 示例 |
 |------|---------|------|
-| 客户名 | 匹配"客户XX""XX项目""为XX"或已知客户名 | 浙江白马 |
-| 环境/节点 | 匹配 IP/主机名/namespace/服务名 | 172.22.1.22 / qm-prod / enableai |
-| 完整报错 | 匹配"返回XX""报错XX""失败""不可用"及紧跟的日志 | 502 core_unreachable |
+| 客户名 | 匹配"客户XX""XX项目""为XX"或已知客户名 | 客户A |
+| 环境/节点 | 匹配 IP/主机名/namespace/服务名 | 10.0.1.5 / prod-server / production |
+| 完整报错 | 匹配"返回XX""报错XX""失败""不可用"及紧跟的日志 | 502 service_unavailable |
 | 已试操作 | 匹配"已试过""重启过""检查了"及紧跟的动作 | 重启 core 服务 |
-| 复现步骤 | 匹配"复现""触发""步骤"或按时间线整理 | curl /api/whoami → 502 |
+| 复现步骤 | 匹配"复现""触发""步骤"或按时间线整理 | curl /api/health → 502 |
 
 抽取不全的字段，标记为 `[待补充]`，不臆造。
 
@@ -123,28 +123,28 @@ Skill 自动抽取关键字段（客户名/环境/报错/已试操作），生�
 ```markdown
 ## 问题上报
 
-- **客户名**：浙江白马
-- **环境/节点**：生产 / 172.22.1.22 / enableai
-- **完整报错**：qm-admin 8090 的 /api/whoami 返回 502 core_unreachable
+- **客户名**：客户A
+- **环境/节点**：生产 / 10.0.1.5 / production
+- **完整报错**：app-service 8090 的 /api/health 返回 502 service_unavailable
 - **已试操作**：重启 core 服务（8080），问题未解决
 - **复现步骤**：
-  1. curl http://172.22.1.22:8090/api/whoami
-  2. 返回 {"code":502,"msg":"core_unreachable"}
+  1. curl http://10.0.1.5:8090/api/health
+  2. 返回 {"code":502,"msg":"service_unavailable"}
 - **紧急度**：🔴 紧急（自动分级，请人工复核）
 - **建议下一步**：
   - 检查 core 服务 8080 是否真的起来（netstat/ss）
-  - 检查 qm-admin 到 core 的网络连通性
+  - 检查 app-service 到 core 的网络连通性
   - 查看 core 服务日志最近报错
 ```
 
 **② JSON 结构化数据**（便于批量统计/知识库沉淀）：
 ```json
 {
-  "customer": "浙江白马",
-  "environment": "生产 / 172.22.1.22 / enableai",
-  "error": "qm-admin 8090 /api/whoami 502 core_unreachable",
+  "customer": "客户A",
+  "environment": "生产 / 10.0.1.5 / production",
+  "error": "app-service 8090 /api/health 502 service_unavailable",
   "tried": "重启 core 服务 8080",
-  "reproduce": "curl http://172.22.1.22:8090/api/whoami → 502",
+  "reproduce": "curl http://10.0.1.5:8090/api/health → 502",
   "severity": "urgent",
   "suggestions": ["检查 core 8080 端口", "检查网络连通性", "查看 core 日志"],
   "timestamp": "2026-10-31T13:30:00+08:00"
