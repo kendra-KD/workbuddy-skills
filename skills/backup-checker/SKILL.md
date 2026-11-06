@@ -2,8 +2,8 @@
 name: ops-backup-checker
 slug: ops-backup-checker
 displayName: 备份健康巡检器
-version: 1.1.0
-description: "备份健康巡检工具。批量检查服务器本地备份文件、MinIO/S3 对象存储备份、数据库备份状态（MySQL dump/PG dump/Redis RDB/MongoDB dump）、K8s 资源备份（ConfigMap/Secret/PV 快照/etcd 快照），验证文件存在/大小/时间戳是否符合预期，按健康度（缺失/过期/异常小/正常）排序生成 Markdown 报告与 JSON 数据。内置 10 类常见备份检查模板。触发短语：'备份检查'、'备份巡检'、'备份健康'、'验证备份'、'backup health'、'backup checker'、'备份是否正常'。面向运维、SRE、DBA、私有化交付。只读不写，不执行备份，不存储备份内容。纯 Python 标准库 + mc/aws-cli/ssh，零第三方依赖。"
+version: 1.2.0
+description: "备份健康巡检工具。两层验证：① 检查备份是否存在/大小/时间戳（本地文件、MinIO/S3、数据库 dump、K8s 资源）；② 恢复演练——校验备份文件是否真的能恢复（gzip/tar/zip 完整性、解压后 SQL 内容特征、Redis RDB 文件头、etcd 快照结构），输出可恢复性评级与恢复命令。内置 10 类备份检查模板。触发短语：'备份检查'、'备份巡检'、'备份健康'、'验证备份'、'备份能不能恢复'、'恢复演练'、'backup health'、'restore drill'、'backup checker'、'备份是否正常'。面向运维、SRE、DBA、私有化交付。只读不写，不执行备份，不存储备份内容。纯 Python 标准库 + mc/aws-cli/ssh，零第三方依赖。"
 agent_created: true
 ---
 
@@ -21,6 +21,7 @@ agent_created: true
 3. **双输出格式**：Markdown 表格报告（人类阅读，可直接复制到企业微信/钉钉）+ JSON 结构化数据（程序化消费，便于接入告警/知识库）
 4. **10 类内置模板**：MySQL dump / PG dump / Redis RDB / Nginx config tar / MinIO bucket / etcd snapshot / K8s ConfigMap-Secret / K8s VolumeSnapshot / MongoDB dump / ClickHouse backup，开箱即用，覆盖数据库+配置+对象存储+K8s 全栈备份场景
 5. **零环境依赖**：纯 Python 标准库（os/stat/json/csv/datetime/subprocess），远程拉取调 mc/aws-cli/ssh，不引入第三方 Python 包
+6. **恢复演练（v1.2 差异化能力）**：不只查"备份在不在"，还验证"备份能不能恢复"——gzip/tar/zip 完整性校验、解压后 SQL 内容特征、Redis RDB 文件头、etcd 快照结构，输出 ✅可恢复 / 🟠存疑 / 🔴不可恢复 三级评级 + 恢复命令参考
 
 **适用场景**：
 - 定期运维巡检（周一早巡检、交接班），防止"以为备份了其实没有"
@@ -28,12 +29,13 @@ agent_created: true
 - 接手新环境或私有化交付时，快速摸清备份现状
 - 故障复盘后验证：确认这个服务相关的备份是否真的可用
 - 备份策略调整前的现状评估
+- **定期恢复演练（v1.2 新增）**：验证备份是否真的可恢复，避免"巡检全绿但恢复失败"的假安全感
 
 **不适用场景**：
 - 自动执行备份（本 Skill 只检查，不触发备份，避免误覆盖已有数据）
-- 备份内容完整性校验（如解压验证/数据库恢复测试，当前只查元信息）
+- 真实数据恢复（恢复演练只校验可恢复性，不实际写入数据库）
 - 实时备份监控（本 Skill 是一次性巡检工具，不是持续监控告警系统）
-- 备份文件内容检索（不读取备份内容，只取文件名/大小/时间戳）
+- 备份文件内容检索（不读取备份内容，只取文件名/大小/时间戳/特征字节）
 
 ---
 
@@ -85,6 +87,27 @@ WorkBuddy 识别到「备份巡检」「备份是否正常」触发本 Skill。�
 > **你说**：检查 db1 的 MySQL dump，路径 /data/backups/db1.sql.gz，最少 10MB，24 小时内
 
 单个目标检查，立即出结果（正常/过期/异常/缺失）。
+
+### 场景 5 · 恢复演练：备份到底能不能恢复（v1.2 新增）
+
+巡检全绿不等于备份真能用——可能是个截断的 gzip、空的 dump、全零的预分配文件。这时用恢复演练：
+
+> **你说**：帮我做一次恢复演练，验证这些备份是不是真的能恢复
+
+WorkBuddy 会对每个备份做深度校验：
+- **gzip/tar/zip**：读完整流，触发 CRC 校验（截断的包会立刻报错）
+- **SQL dump**：解压后检查是否含 `CREATE TABLE` / `INSERT INTO` 等真实语句（防"空 dump 假绿"）
+- **Redis RDB**：检查文件头是否为 `REDIS`
+- **etcd 快照**：检查文件头有效性和大小合理性
+- **全零检测**：前 4KB 全 `0x00` 直接判定为坏备份
+
+输出 ✅可恢复 / 🟠存疑 / 🔴不可恢复 三级评级，每个目标还附**恢复命令参考**（如 `gunzip -c db1.sql.gz | mysql -u<user> -p <db>`）。
+
+> **你说**：db1 那个 dump 是空的吗？帮我验一下
+
+> **你说**：恢复演练，只查 /data/backups 下这几个 sql.gz
+
+单个目标也可以做，不需要 CSV。
 
 ---
 
@@ -144,7 +167,32 @@ python scripts/check_backups.py --single "mysql-dump-db1" --type local-file --pa
 
 # 方式三：只看 JSON 结构化数据（便于接入告警系统）
 cat check_result.json
+
+# 方式四：恢复演练——验证备份真的能恢复（v1.2 新增）
+python scripts/restore_drill.py --csv assets/backup_targets_template.csv
+python scripts/restore_drill.py --single db1-dump --path /data/backups/db1.sql.gz --db-type mysql
+python scripts/restore_drill.py --csv assets/backup_targets_template.csv --format json --output drill.json
+# 大文件可限制深度读取上限（默认 200MB，超过跳过完整性校验）
+python scripts/restore_drill.py --csv assets/backup_targets_template.csv --max-read-mb 500
 ```
+
+**恢复演练报告示例**：
+```markdown
+| 目标 | 路径 | 大小 | 可恢复性 | 关键结论 |
+|------|------|------|---------|---------|
+| db1-mysql-dump | /data/backups/db1.sql.gz | 0.0 MB | 🔴 不可恢复 | gzip 读取失败: Compressed file ended before the end-of-stream marker was reached |
+| db2-mysql-dump | /data/backups/db2.sql.gz | 128.4 MB | ✅ 可恢复 | 解压后命中 SQL 特征: CREATE TABLE, INSERT INTO |
+| redis-rdb | /data/redis/dump.rdb | 3.2 MB | ✅ 可恢复 | RDB 版本 0011 |
+```
+
+**两级验证的分工**：
+
+| 脚本 | 回答的问题 | 检查内容 | 速度 |
+|------|-----------|---------|------|
+| `check_backups.py` | 备份**在不在**、**多大多新** | 存在性 + 大小阈值 + 时间戳新鲜度 | 秒级（只读元信息） |
+| `restore_drill.py` | 备份**能不能恢复** | 文件完整性 + 内容特征 + 结构合法性 | 读文件（受 max-read-mb 限制） |
+
+建议工作流：先跑 `check_backups.py` 快速排查（缺失/过期/太小），再对 🟢正常 的目标跑 `restore_drill.py` 验证真实性——这才是真正的"备份可信"。
 
 **Markdown 报告示例**：
 ```markdown
@@ -184,7 +232,9 @@ cat check_result.json
 |------|------|
 | `scripts/check_backups.py` | 核心检查脚本，读取巡检清单，检查各备份目标并输出 JSON |
 | `scripts/generate_report.py` | 报告生成脚本，JSON 转 Markdown 表格并按健康度排序 |
-| `references/backup_templates.md` | 5 类内置备份检查模板详解（检查要点/默认阈值/适用场景） |
+| `scripts/restore_drill.py` | **恢复演练脚本（v1.2）**，校验备份是否真的可恢复，输出可恢复性评级 + 恢复命令 |
+| `references/backup_templates.md` | 10 类内置备份检查模板详解（检查要点/默认阈值/适用场景） |
+| `references/restore_drill_guide.md` | **恢复演练指南（v1.2）**，校验原理/检查项说明/评级规则/最佳实践 |
 | `references/setup_guide.md` | 环境准备指引（mc/aws-cli/ssh/kubectl 安装与配置） |
 | `assets/backup_targets_template.csv` | 巡检清单模板（含字段说明注释） |
 
@@ -198,7 +248,10 @@ cat check_result.json
 3. **不硬编码任何凭据**：SSH 密钥、MinIO access key、数据库密码等一律走环境变量或用户配置，不写进脚本
 4. **不自动执行备份**：检查与备份任务解耦，避免巡检脚本误触发备份覆盖已有数据
 5. **远程拉取只读**：SSH/mc/aws-cli/kubectl 调用只用 ls/stat/head 等只读命令，不用任何写入命令
+6. **恢复演练不真实恢复（v1.2）**：`restore_drill.py` 只校验文件结构与内容特征，**绝不连数据库、绝不写入目标环境**；输出的恢复命令仅供参考，需人工确认后手动执行
+7. **深度读取有上限（v1.2）**：`restore_drill.py` 默认最多读取 200MB（`--max-read-mb` 可调），超过则跳过完整性校验并标记 ⚪未验证，避免巡检本身拖垮磁盘 IO
+8. **不解压落地（v1.2）**：gzip/tar/zip 校验全程流式读取，不产生任何临时解压文件
 
 ### 适用边界
-- 适合：定期备份巡检、批量备份盘点、交接环境摸底、故障复盘后验证
-- 不适合：自动执行备份、备份内容完整性校验（解压/恢复测试）、实时备份监控、备份内容检索
+- 适合：定期备份巡检、批量备份盘点、交接环境摸底、故障复盘后验证、恢复演练验证可恢复性
+- 不适合：自动执行备份、真实数据恢复、实时备份监控、备份内容检索

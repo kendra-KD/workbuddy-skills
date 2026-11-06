@@ -350,16 +350,26 @@ def _evaluate_bucket(bucket, count, size_mb, newest_ts, age_hours,
 # ----- CSV loading -----
 
 def load_csv(csv_path):
-    """Load backup targets from CSV. Supports # comment lines."""
+    """Load backup targets from CSV. Supports # comment lines.
+
+    Robust against ragged rows: extra/missing columns are tolerated.
+    """
     targets = []
-    with open(csv_path, "r", encoding="utf-8") as f:
+    with open(csv_path, "r", encoding="utf-8-sig") as f:
         lines = [ln for ln in f if not ln.lstrip().startswith("#") and ln.strip()]
     reader = csv.DictReader(lines)
     for row in reader:
-        row = {k: (v or "").strip() for k, v in row.items()}
-        if not row.get("name") or not row.get("type") or not row.get("path"):
+        clean = {}
+        for k, v in row.items():
+            if k is None:
+                # extra columns beyond the header land here as a list; ignore them
+                continue
+            if isinstance(v, list):
+                v = v[0] if v else ""
+            clean[k] = (v or "").strip()
+        if not clean.get("name") or not clean.get("type") or not clean.get("path"):
             continue
-        targets.append(row)
+        targets.append(clean)
     return targets
 
 
