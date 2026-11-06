@@ -60,9 +60,26 @@ def _load_yaml_documents(path: str) -> dict:
             continue
         name = doc.get("metadata", {}).get("name", "")
         kind = doc.get("kind", "")
-        if name and kind in ("ConfigMap", "Secret", "Ingress"):
+        if name and kind in ("ConfigMap", "Secret", "Ingress", "Deployment",
+                             "StatefulSet", "DaemonSet", "Job", "CronJob"):
             docs[f"{kind}/{name}"] = doc
     return docs
+
+
+def _iter_containers(doc):
+    """遍历工作负载里的所有容器（含 initContainers）。"""
+    spec = doc.get("spec", {}) or {}
+    template_spec = (spec.get("template", {}) or {}).get("spec", {}) or {}
+    # CronJob 多一层 jobTemplate
+    if doc.get("kind") == "CronJob":
+        template_spec = ((spec.get("jobTemplate", {}) or {}).get("spec", {}) or {}) \
+            .get("template", {}).get("spec", {}) or {}
+    out = []
+    for key in ("initContainers", "containers"):
+        for c in template_spec.get(key) or []:
+            if isinstance(c, dict):
+                out.append(c)
+    return out
 
 
 # ---------- 审计实现 ----------
@@ -245,3 +262,133 @@ def audit_multi_env_diff(args) -> list:
             })
 
     return findings
+
+
+def audit_k8s_resource_limits(args) -> list:
+    """检查工作负载是否设置 resources.requests/limits。
+
+    检查项：
+      - 缺 limits（全部缺失 → 高；仅缺 memory 或 cpu → 中）
+      - 缺 requests（中）
+      - limits < requests（高，会被 API Server 拒绝或行为异常）
+      - 未设 memory limit（中，容易引发节点 OOM）
+      - QoS 等级为 BestEffort（高，最先被驱逐）
+    """
+    path = args.current or args.workload
+    if not path:
+        return [{
+            "severity": "high",
+            "category": "k8s-resource-limits",
+            "message": "缺少 --current 或 --workload 参数",
+            "suggestion": "提供 Deployment/StatefulSet/DaemonSet 的 YAML 文件路径",
+        }]
+    if not os.path.exists(path):
+        return [{
+            "severity": "high",
+            "category": "k8s-resource-limits",
+            "message": f"文件不存在: {path}",
+            "suggestion": "检查路径是否正确",
+        }]
+
+    try:
+        docs = _load_yaml_documents(path)
+    except Exception as e:
+        return [{
+            "severity": "high",
+            "category": "k8s-resource-limits",
+            "message": f"YAML 解析失败: {e}",
+            "suggestion": "确认文件是合法 YAML，且 PyYAML 已安装",
+        }]
+
+    workload_kinds = ("Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob")
+    findings = []
+
+    for key, doc in docs.items():
+        kind = doc.get("kind", "")
+        if kind not in workload_kinds:
+            continue
+
+        containers = _iter_containers(doc)
+        if not containers:
+            continue
+
+        for c in containers:
+            cname = c.get("name", "<unnamed>")
+            res = c.get("resources", {}) or {}
+            requests = res.get("requests", {}) or {}
+            limits = res.get("limits", {}) or {}
+
+            if not requests and not limits:
+                findings.append({
+                    "severity": "high",
+                    "category": "k8s-resource-limits",
+                    "loc": f"{key}/{cname}",
+                    "message": f"{key} 容器 `{cname}` 未设置任何 resources（QoS=BestEffort，最易被驱逐）",
+                    "suggestion": "至少设置 requests.cpu/memory 和 limits.memory，推荐 QoS=Burstable 或 Guaranteed",
+                })
+                continue
+
+            if not limits:
+                findings.append({
+                    "severity": "medium",
+                    "category": "k8s-resource-limits",
+                    "loc": f"{key}/{cname}",
+                    "message": f"{key} 容器 `{cname}` 只设了 requests，未设 limits",
+                    "suggestion": "补充 limits，尤其是 limits.memory，避免单容器吃满节点内存触发 OOM",
+                })
+            elif "memory" not in limits:
+                findings.append({
+                    "severity": "medium",
+                    "category": "k8s-resource-limits",
+                    "loc": f"{key}/{cname}",
+                    "message": f"{key} 容器 `{cname}` 未设置 limits.memory",
+                    "suggestion": "设置 limits.memory，否则容器内存可无限增长直到节点 OOM",
+                })
+
+            if not requests:
+                findings.append({
+                    "severity": "medium",
+                    "category": "k8s-resource-limits",
+                    "loc": f"{key}/{cname}",
+                    "message": f"{key} 容器 `{cname}` 未设置 requests",
+                    "suggestion": "设置 requests 让调度器能正确评估节点资源，避免超卖导致争抢",
+                })
+
+            # limits < requests 是非法配置
+            for rk in ("cpu", "memory"):
+                if rk in requests and rk in limits:
+                    rv = _parse_quantity(requests[rk])
+                    lv = _parse_quantity(limits[rk])
+                    if rv is not None and lv is not None and lv < rv:
+                        findings.append({
+                            "severity": "high",
+                            "category": "k8s-resource-limits",
+                            "loc": f"{key}/{cname}",
+                            "message": f"{key} 容器 `{cname}` 的 limits.{rk}({limits[rk]}) < requests.{rk}({requests[rk]})",
+                            "suggestion": "limits 必须 ≥ requests，否则 API Server 会拒绝或 Pod 行为异常",
+                        })
+
+    return findings
+
+
+def _parse_quantity(v):
+    """把 K8s 资源值解析为数值（CPU 为核数，内存为字节数近似）。"""
+    if v is None:
+        return None
+    s = str(v).strip()
+    try:
+        if s.endswith("m"):
+            return float(s[:-1]) / 1000.0
+        if s.endswith("Mi"):
+            return float(s[:-2]) * 1024 ** 2
+        if s.endswith("Gi"):
+            return float(s[:-2]) * 1024 ** 3
+        if s.endswith("Ki"):
+            return float(s[:-2]) * 1024
+        if s.endswith("M"):
+            return float(s[:-1]) * 1000 ** 2
+        if s.endswith("G"):
+            return float(s[:-1]) * 1000 ** 3
+        return float(s)
+    except (ValueError, TypeError):
+        return None

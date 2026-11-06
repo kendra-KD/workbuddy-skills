@@ -15,13 +15,14 @@ import argparse
 import json
 import sys
 
-from nginx_audit import audit_nginx_upstream
+from nginx_audit import audit_nginx_upstream, audit_nginx_ssl_mismatch
 from ssl_audit import audit_ssl_cert_match
 from k8s_audit import (
     audit_k8s_configmap_drift,
     audit_k8s_secret_drift,
     audit_k8s_ingress_cert,
     audit_multi_env_diff,
+    audit_k8s_resource_limits,
 )
 
 
@@ -56,6 +57,16 @@ AUDIT_TYPES = {
         "handler": audit_multi_env_diff,
         "args": ["files"],
     },
+    "nginx-ssl-mismatch": {
+        "name": "Nginx server_name 与证书 SAN 匹配审计",
+        "handler": audit_nginx_ssl_mismatch,
+        "args": ["nginx_conf"],
+    },
+    "k8s-resource-limits": {
+        "name": "K8s 工作负载资源限制审计",
+        "handler": audit_k8s_resource_limits,
+        "args": ["current"],
+    },
 }
 
 
@@ -72,12 +83,12 @@ def print_markdown_report(audit_type: str, findings: list):
         print("✅ 未发现明显配置风险。\n")
         return
 
-    print("| 风险等级 | 审计项 | 问题 | 修复建议 |")
-    print("|---------|--------|------|---------|")
+    print("| 风险等级 | 审计项 | 位置 | 问题 | 修复建议 |")
+    print("|---------|--------|------|------|---------|")
     for f in findings:
         print(
             f"| {severity_icon(f['severity'])} {f['severity'].upper()} "
-            f"| {f['category']} | {f['message']} | {f['suggestion']} |"
+            f"| {f['category']} | {f.get('loc', '-')} | {f['message']} | {f['suggestion']} |"
         )
     print()
 
@@ -98,7 +109,8 @@ def main():
     parser.add_argument("--nginx-conf", help="Nginx 配置文件或目录")
     parser.add_argument("--cert", help="证书文件路径")
     parser.add_argument("--domains", help="域名清单 CSV 或单个域名")
-    parser.add_argument("--current", help="当前配置 YAML")
+    parser.add_argument("--current", help="当前配置 YAML（k8s-resource-limits 时为工作负载 YAML）")
+    parser.add_argument("--workload", help="工作负载 YAML（k8s-resource-limits 别名）")
     parser.add_argument("--expected", help="期望配置 YAML")
     parser.add_argument("--ingress-yaml", help="Ingress YAML 文件")
     parser.add_argument("--secret-yaml", help="Secret YAML 文件")

@@ -2,8 +2,8 @@
 name: ops-config-audit
 slug: ops-config-audit
 displayName: 运维配置审计器
-version: 1.0.0
-description: "运维配置审计器。检查 Nginx upstream 与后端 service 是否一致、SSL 证书与 ingress 域名是否匹配、K8s ConfigMap/Secret/Deployment 配置是否漂移。输入目标环境或配置文件，输出风险等级+修复建议。纯规则引擎，不调用 AI API，零成本零延迟。触发短语：'配置审计'、'检查一下配置'、'config audit'、'nginx 配置检查'、'ssl 证书和域名是否匹配'、'k8s 配置漂移'。本 Skill 是运维全生命周期四件套的前置环节（预防→发现→上报→解决）。"
+version: 1.1.0
+description: "运维配置审计器。检查 Nginx upstream 与后端 service 是否一致、Nginx server_name 与证书 SAN 是否匹配、SSL 证书与域名是否匹配、K8s ConfigMap/Secret 配置漂移、Ingress TLS secret 完整性、工作负载 resources limits 是否合理、多环境配置是否一致。输入目标环境或配置文件，输出风险等级+修复建议。纯规则引擎，不调用 AI API，零成本零延迟。触发短语：'配置审计'、'检查一下配置'、'config audit'、'nginx 配置检查'、'ssl 证书和域名是否匹配'、'k8s 配置漂移'、'资源限制检查'。本 Skill 是运维全生命周期五件套的前置环节（配置审计→预防→发现→上报→解决）。"
 agent_created: true
 ---
 
@@ -73,6 +73,28 @@ agent_created: true
 
 输出本地文件级审计结果。
 
+**场景 6 · Nginx 域名和证书对不上（v1.1）**
+
+上线后浏览器报 `NET::ERR_CERT_COMMON_NAME_INVALID`，或者某个域名在 nginx 里配了 443 但访问报证书错误：
+
+> **你说**：帮我查一下 nginx 里的 server_name 和证书 SAN 是否匹配
+
+输出每个 server 块的 server_name 是否被其 `ssl_certificate` 覆盖，还会检查证书和私钥是否成对（modulus 是否一致）。
+
+**场景 7 · K8s 资源限制检查（v1.1）**
+
+集群 OOM 频发，怀疑有工作负载没设内存限制：
+
+> **你说**：检查一下这几个 deployment 有没有设置 resources limits
+
+输出每个容器的 requests/limits 配置情况：
+- 完全没设 resources → 🔴 高（QoS=BestEffort，最容易被驱逐）
+- 只设 requests 没设 limits → 🟡 中
+- 缺 limits.memory → 🟡 中（容器内存可无限增长到节点 OOM）
+- limits < requests → 🔴 高（非法配置）
+
+> **你说**：kubectl get deploy -o yaml > deploy.yaml，帮我审一下资源限制
+
 ---
 
 ## 支持的审计项
@@ -80,10 +102,12 @@ agent_created: true
 | 审计项 | 说明 | 所需输入 |
 |--------|------|---------|
 | `nginx-upstream` | Nginx upstream 与后端 service 一致性 | nginx 配置文件或目录 |
+| `nginx-ssl-mismatch` | **Nginx server_name 与证书 SAN 匹配度（v1.1）** | nginx 配置文件 + 证书文件 |
 | `ssl-cert-match` | SSL 证书 CN/SAN 与域名匹配度 | 证书文件 + 域名清单 |
 | `k8s-configmap-drift` | ConfigMap 当前值 vs 期望值 | 当前 YAML + 期望 YAML |
 | `k8s-secret-drift` | Secret 是否存在/键值是否匹配 | 当前 YAML + 期望 YAML |
 | `k8s-ingress-cert` | Ingress TLS secret 与域名是否匹配 | `kubectl get ingress` + secret |
+| `k8s-resource-limits` | **工作负载 resources.requests/limits 审计（v1.1）** | 工作负载 YAML |
 | `multi-env-diff` | 多环境同一份配置的差异 | dev/staging/prod 三个配置文件 |
 
 ---
@@ -105,14 +129,42 @@ ops-config-audit/
 ├── SKILL.md
 ├── scripts/
 │   ├── config_audit.py      # 主入口脚本
-│   ├── nginx_audit.py        # Nginx 配置审计
+│   ├── nginx_audit.py        # Nginx upstream + server_name/证书匹配审计
 │   ├── ssl_audit.py          # SSL 证书审计
-│   └── k8s_audit.py          # K8s 配置漂移审计
+│   └── k8s_audit.py          # K8s 配置漂移 + 资源限制审计
 ├── assets/
 │   └── domains_template.csv  # 域名清单模板
 └── references/
     ├── audit_guide.md        # 审计方法论
     └── check_templates.md    # 检查模板说明
+```
+
+## 快速使用
+
+```bash
+# 列出所有审计类型
+python scripts/config_audit.py --list-types
+
+# Nginx upstream 一致性
+python scripts/config_audit.py --type nginx-upstream --nginx-conf /etc/nginx
+
+# Nginx server_name 与证书 SAN 匹配（v1.1）
+python scripts/config_audit.py --type nginx-ssl-mismatch --nginx-conf /etc/nginx
+
+# SSL 证书与域名匹配
+python scripts/config_audit.py --type ssl-cert-match --cert cert.pem --domains example.com,www.example.com
+
+# K8s ConfigMap 漂移
+python scripts/config_audit.py --type k8s-configmap-drift --current now.yaml --expected want.yaml
+
+# K8s 资源限制审计（v1.1）
+python scripts/config_audit.py --type k8s-resource-limits --current deploy.yaml
+
+# 多环境配置差异
+python scripts/config_audit.py --type multi-env-diff --files dev.conf,staging.conf,prod.conf
+
+# JSON 输出（便于接入流水线）
+python scripts/config_audit.py --type k8s-resource-limits --current deploy.yaml --format json
 ```
 
 ---
