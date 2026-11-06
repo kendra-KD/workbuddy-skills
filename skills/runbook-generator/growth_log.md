@@ -127,3 +127,43 @@ SkillHub 后台数据显示 ops-fault-runbook 是四件套下载量最高的（1
 - 23 个 runbook 是否导致匹配稀释：需实测验证输入原有关键词是否仍能正确命中。
 - 新增 runbook 的自然语言召回率：如"节点掉了"能否命中 `k8s-node-notready`。
 - 下一步是否继续扩到 30 个，或转向 ops-config-audit 等新 skill。
+
+---
+
+## #004 · 2026-11-06 · v1.3 升级（补中间件/可观测性类高频故障）
+
+### 触发场景
+v1.2 发布后下载量 28→38（+36%），验证扩模板策略有效。用户明确指出工作中高频但现有 23 个 runbook 未覆盖的四类故障：MySQL 连接失败（此前只有泛化的 db-connection-failure）、Nacos、Kafka、Prometheus 告警风暴。这四类属于「中间件 + 可观测性」层，是私有化交付场景的刚需。
+
+### 方案选择
+- **扩 4 个 runbook**（23→27）：
+  - `mysql-connection-failure` · MySQL 连接失败排查（细化，与 db-connection-failure 分工：后者是跨数据库通用，前者是 MySQL 专项深度）
+  - `nacos-unavailable` · Nacos 不可用排查
+  - `kafka-topic-lag` · Kafka Topic Lag 高排查
+  - `prometheus-alert-storm` · Prometheus 告警风暴排查
+- **选取标准**：① 用户真实运维场景 ② 属于「中间件/可观测性」层（此前未覆盖） ③ 私有化交付高频 ④ 命令可复制
+- **关键词设计避免互相稀释**：
+  - `mysql-connection-failure` 用 `mysql 连接失败` / `mysql connection refused` / `too many connections`，与 `db-connection-failure` 的通用关键词区分
+  - `prometheus-alert-storm` 用 `告警风暴` / `alert storm` / `告警轰炸`，避免和普通「告警」误匹配
+- **版本**：1.2.0 → 1.3.0
+
+### 最终效果
+- runbook_lib.py：23 个 → 27 个 runbook
+- SKILL.md：version→1.3.0，description 和清单表补全 27 个
+- runbook_catalog.md：追加 4 个新 runbook 详解
+- growth_log.md：追加本记录
+
+### 关键决策
+1. **mysql-connection-failure 与 db-connection-failure 并存而非替代**：db-connection-failure 是跨库通用排查框架（MySQL/PG/Redis 都能用），mysql-connection-failure 是 MySQL 专项深度（连接数、bind-address、鉴权、host 权限）。用户输入越具体，走专项；越泛化，走通用。
+2. **补中间件层是差异化关键**：市面通用 runbook 工具多覆盖 HTTP/K8s 层，中间件（Nacos/Kafka）和可观测性（Prometheus）层覆盖少，这是运维经验的护城河。
+3. **告警风暴是「元故障」**：它不是单一服务故障，而是监控体系失效，排查逻辑不同于普通服务故障，单独成 runbook 合理。
+
+### 踩坑记录
+| # | 问题 | 根因 | 修复 | 耗时 |
+|---|------|------|------|------|
+| 1 | 新增 runbook 后需回归验证旧关键词不被稀释 | 27 个 runbook 关键词总量增加，短查询可能被新关键词抢走 | 跑全量回归测试（原 23 个 + 新 4 个 + 自然语言） | 低 |
+
+### 待观察
+- 27 个 runbook 是否让 `--list` 输出过长影响体验（当前列表模式已比较长）。
+- `mysql 连接失败` 与 `数据库连接失败` 的实际分流效果。
+- 是否继续扩到 30+ 个，或转向提升匹配质量（同义词/拼音容错）。

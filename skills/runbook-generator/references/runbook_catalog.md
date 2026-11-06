@@ -424,3 +424,71 @@ python scripts/runbook_matcher.py <关键词>
 **排查步骤要点**：`df -h` 确认哪个目录满 → `du -sh /var/log/*` 定位大日志 → 检查 logrotate 配置 → 清理/压缩过期日志 → 调整日志级别/轮转策略 → 监控防止复发
 
 **关键命令**：`df -h`、`du -sh /var/log/*`、`ls -lhS /var/log/ | head -20`、`lsof +L1 /var/log`（找已删除但仍被占用的文件）、`logrotate -d /etc/logrotate.conf`、`journalctl --vacuum-time=7d`
+
+---
+
+### 24. `mysql-connection-failure` · MySQL 连接失败排查
+
+**适用**：应用无法连接 MySQL，报错 connection refused / too many connections / timeout 等。
+
+**根因覆盖**：
+- MySQL 服务未启动或异常（🔴 高）
+- 网络/端口不可达或防火墙拦截（🔴 高）
+- 连接数耗尽（too many connections）（🔴 高）
+- 用户名/密码/权限错误（🟡 中）
+- DNS 解析或绑定地址问题（🟡 中）
+
+**排查步骤要点**：确认 mysqld 进程状态 → `telnet`/`nc` 测试 3306 端口 → 检查 Threads_connected / max_connections → 用同样账号测试登录 → 检查 bind-address 和 skip-name-resolve
+
+**关键命令**：`systemctl status mysql`、`telnet <host> 3306`、`SHOW STATUS LIKE 'Threads_connected'`、`mysql -u<user> -p -h<host>`、`grep bind-address /etc/my.cnf`
+
+---
+
+### 25. `nacos-unavailable` · Nacos 不可用排查
+
+**适用**：应用无法连接 Nacos，服务注册/发现失败。
+
+**根因覆盖**：
+- Nacos 服务未启动或集群节点异常（🔴 高）
+- 网络/端口不可达（🔴 高）
+- 命名空间 ID 配置错误（🟡 中）
+- 鉴权失败（用户名/密码/AK）（🟡 中）
+- Nacos 数据库异常（🟢 低）
+
+**排查步骤要点**：确认 Nacos 进程和 readiness → `telnet` 测试 8848 端口 → 检查客户端 server-addr/namespace/username 配置 → 测试 Nacos 鉴权 → 查看 nacos.log
+
+**关键命令**：`curl <nacos>:8848/nacos/v1/console/health/readiness`、`telnet <nacos-host> 8848`、`grep -E 'server-addr|namespace|username' application.yml`、`curl -X POST nacos/v1/auth/users/login`、查看 `/opt/nacos/logs/nacos.log`
+
+---
+
+### 26. `kafka-topic-lag` · Kafka Topic Lag 高排查
+
+**适用**：Kafka 消费者跟不上生产速度，topic lag 持续升高。
+
+**根因覆盖**：
+- 消费者数量不足或消费能力不够（🔴 高）
+- 分区数太少，无法横向扩展（🔴 高）
+- 单条消息处理耗时过长（🟡 中）
+- 消费者频繁 rebalance（🟡 中）
+- 网络/IO 瓶颈或 GC 暂停（🟢 低）
+
+**排查步骤要点**：`kafka-consumer-groups.sh --describe` 看 lag → 检查消费者实例数与分区数 → 检查消息处理耗时 → 检查 rebalance 频率 → 临时扩容消费者或增加分区
+
+**关键命令**：`kafka-consumer-groups.sh --bootstrap-server <broker> --describe --group <group>`、`kafka-topics.sh --alter --topic <t> --partitions <n>`、`grep -i rebalance /var/log/<consumer>.log`
+
+---
+
+### 27. `prometheus-alert-storm` · Prometheus 告警风暴排查
+
+**适用**：Prometheus 触发大量告警，Alertmanager 消息轰炸。
+
+**根因覆盖**：
+- 告警阈值设置过严或采样窗口太短（🔴 高）
+- 大量 target 同时离线（网络抖动/重启）（🔴 高）
+- Alertmanager 分组/抑制/路由配置缺失（🟡 中）
+- 上游依赖故障导致级联告警（🟡 中）
+- flapping alert（阈值附近反复横跳）（🟢 低）
+
+**排查步骤要点**：Alertmanager API 看告警分布 → 检查 Prometheus 告警规则 threshold/for → 检查 up metric 是否有大量 target down → 检查 alertmanager.yml 的 group_by/inhibit_rules/repeat_interval → 临时 silence 并修复根因
+
+**关键命令**：`curl <alertmanager>:9093/api/v2/alerts`、`cat /etc/prometheus/rules/*.yml`、`promql up == 0`、`cat /etc/alertmanager/alertmanager.yml`、`POST /api/v2/silences`

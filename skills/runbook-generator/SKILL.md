@@ -2,8 +2,8 @@
 name: ops-fault-runbook
 slug: ops-fault-runbook
 displayName: 运维故障 Runbook 生成器
-version: 1.2.0
-description: "运维故障 Runbook 生成器。输入故障特征（如 502/503/504/timeout/DNS解析失败/数据库连接失败/证书过期/pod crashloopbackoff/pod pending/MinIO S3 500/磁盘满/OOM/Docker容器无法启动/Nginx配置错误/K8s节点NotReady/MySQL慢查询/Redis内存满/Ingress不通/Jenkins构建失败/镜像拉取失败/CPU过高/日志目录满），自动匹配预置实战 runbook，输出结构化排查步骤+验证命令+回退方案+根因假设。未匹配时推荐最接近的 runbook 并给出通用排查框架。触发短语：'故障排查'、'runbook'、'排查步骤'、'怎么排查'、'故障处理流程'、'troubleshoot runbook'、'incident playbook'、'生成排查手册'。面向运维工程师、SRE、技术支持、私有化交付。纯规则引擎，不调 AI API，零成本零延迟。本 Skill 是运维全生命周期四件套之一（预防→发现→上报→解决）。"
+version: 1.3.0
+description: "运维故障 Runbook 生成器。输入故障特征（如 502/503/504/timeout/DNS解析失败/数据库连接失败/MySQL连接失败/Nacos不可用/KafkaLag/Prometheus告警风暴/证书过期/pod crashloopbackoff/pod pending/MinIO S3 500/磁盘满/OOM/Docker容器无法启动/Nginx配置错误/K8s节点NotReady/MySQL慢查询/Redis内存满/Ingress不通/Jenkins构建失败/镜像拉取失败/CPU过高/日志目录满），自动匹配预置实战 runbook，输出结构化排查步骤+验证命令+回退方案+根因假设。未匹配时推荐最接近的 runbook 并给出通用排查框架。触发短语：'故障排查'、'runbook'、'排查步骤'、'怎么排查'、'故障处理流程'、'troubleshoot runbook'、'incident playbook'、'生成排查手册'。面向运维工程师、SRE、技术支持、私有化交付。纯规则引擎，不调 AI API，零成本零延迟。本 Skill 是运维全生命周期四件套之一（预防→发现→上报→解决）。"
 agent_created: true
 ---
 
@@ -82,7 +82,7 @@ WorkBuddy 识别到「crashloopbackoff」「排查」触发本 Skill，内部匹
 
 > **你说**：runbook 列表 / 都有哪些排查手册
 
-输出全部 23 个内置 runbook 的清单（ID + 故障类型 + 关键词），你看到接近的再用 `--detail <id>` 或直接描述现象触发。
+输出全部 27 个内置 runbook 的清单（ID + 故障类型 + 关键词），你看到接近的再用 `--detail <id>` 或直接描述现象触发。
 
 ### 场景 5 · 新人学习常见故障排查流程
 
@@ -97,7 +97,7 @@ WorkBuddy 识别到「crashloopbackoff」「排查」触发本 Skill，内部匹
 ### Step 1 · 识别故障特征
 
 用户提供故障关键词或描述。支持两种输入：
-- **关键词**：`502`、`503`、`timeout`、`证书过期`、`pod crashloopbackoff`、`OOM`、`磁盘满`、`connection refused`、`MinIO 500`、`node notready`、`mysql 慢查询`、`redis 内存满`、`ingress 不通`、`jenkins 构建失败`、`镜像拉取失败`、`CPU 高`、`日志目录满`
+- **关键词**：`502`、`503`、`timeout`、`证书过期`、`pod crashloopbackoff`、`OOM`、`磁盘满`、`connection refused`、`MinIO 500`、`node notready`、`mysql 慢查询`、`redis 内存满`、`ingress 不通`、`jenkins 构建失败`、`镜像拉取失败`、`CPU 高`、`日志目录满`、`mysql 连接失败`、`nacos 不可用`、`kafka lag`、`prometheus 告警风暴`
 - **自然语言**：`生产环境 502 了`、`有个 pod 一直 crashloopbackoff`、`证书快过期了怎么处理`
 
 ### Step 2 · 匹配预置 Runbook
@@ -157,6 +157,10 @@ python scripts/runbook_matcher.py --detail http-502
 | `docker-image-pull-failure` | Docker 镜像拉取失败 | imagepullbackoff、镜像拉取失败、docker pull |
 | `high-cpu-usage` | CPU 使用率过高 | cpu 高、cpu 100%、cpu 打满、cpu 占用 |
 | `log-disk-full` | 日志目录磁盘满 | 日志目录满、log 目录满、var log 满、日志过大 |
+| `mysql-connection-failure` | MySQL 连接失败 | mysql 连接失败、mysql connection refused、too many connections |
+| `nacos-unavailable` | Nacos 不可用 | nacos 不可用、nacos 连不上、nacos 注册失败 |
+| `kafka-topic-lag` | Kafka Topic Lag 高 | kafka lag、kafka 消费延迟、consumer lag、消息积压 |
+| `prometheus-alert-storm` | Prometheus 告警风暴 | prometheus 告警风暴、alertmanager 轰炸、告警风暴 |
 
 ## 输出格式
 

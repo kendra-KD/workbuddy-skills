@@ -578,7 +578,7 @@ RUNBOOKS = [
     {
         "id": "db-connection-failure",
         "title": "数据库连接失败排查",
-        "keywords": ["数据库连接失败", "db connection", "connection refused mysql", "connection refused postgres", "连不上数据库", "database connection", "access denied", "too many connections", "mysql 连接", "pg 连接", "数据库", "mysql 连接失败", "postgres 连接失败", "mysql 连不上", "pg 连不上", "数据库连不上", "mysql connection", "postgres connection", "redis connection", "数据库 connection"],
+        "keywords": ["数据库连接失败", "db connection", "connection refused mysql", "connection refused postgres", "连不上数据库", "database connection", "access denied", "mysql 连接", "pg 连接", "数据库", "mysql 连接失败", "postgres 连接失败", "mysql 连不上", "pg 连不上", "数据库连不上", "mysql connection", "postgres connection", "redis connection", "数据库 connection"],
         "summary": "应用无法连接数据库，可能是数据库服务未启动、网络不通、凭据错误、连接池耗尽、权限问题。常见于 MySQL/PostgreSQL/Redis。",
         "root_causes": [
             {"cause": "数据库服务未启动或崩溃", "verify": "检查数据库进程/pod 状态", "probability": "高"},
@@ -1173,6 +1173,212 @@ RUNBOOKS = [
         ],
         "verify": "df -h 显示日志目录使用率 <80%，且有自动轮转机制。",
         "rollback": "清理操作不可逆。如果误删了关键日志：\n# 如果有备份则恢复\n# 否则只能等待新的日志产生\n# 建议：清理前对大日志文件做 tar 备份",
+    },
+    # ─────────────── 24. MySQL 连接失败细化 ───────────────
+    {
+        "id": "mysql-connection-failure",
+        "title": "MySQL 连接失败排查",
+        "keywords": [
+            "mysql 连接失败", "mysql connection refused", "mysql too many connections", "too many connections",
+            "mysql 连不上", "mysql 拒绝连接", "mysql 连接超时", "mysql timeout",
+            "mysql 连接数满", "mysql connection", "mysql 连接"
+        ],
+        "summary": "应用无法连接 MySQL，报错 connection refused / too many connections / timeout 等。常见原因：网络不通、MySQL 未启动、连接数满、用户权限错误、防火墙/安全组限制。",
+        "root_causes": [
+            {"cause": "MySQL 服务未启动或异常", "verify": "systemctl status mysql / mysqld", "probability": "高"},
+            {"cause": "网络/端口不可达或防火墙拦截", "verify": "telnet <host> 3306", "probability": "高"},
+            {"cause": "连接数耗尽（too many connections）", "verify": "SHOW STATUS LIKE 'Threads_connected' / Max_connections", "probability": "高"},
+            {"cause": "用户名/密码/权限错误", "verify": "mysql -u<user> -p -h<host> 测试", "probability": "中"},
+            {"cause": "DNS 解析或绑定地址问题", "verify": "bind-address 配置 / skip-name-resolve", "probability": "中"},
+        ],
+        "steps": [
+            {
+                "action": "确认 MySQL 服务状态",
+                "command": "# 在 MySQL 服务器上执行\nsystemctl status mysql || systemctl status mysqld\nps -ef | grep -i mysql | grep -v grep",
+                "expected": "mysqld 进程存在，状态为 active (running)",
+                "judgment": "未运行→启动或排查启动失败原因；运行中→继续下一步",
+            },
+            {
+                "action": "测试网络连通性",
+                "command": "# 从应用服务器执行\ntelnet <mysql_host> 3306\n# 或\nnc -zv <mysql_host> 3306",
+                "expected": "端口可达，返回 Connected 或类似信息",
+                "judgment": "端口不通→检查防火墙/安全组/网络策略；端口通→继续下一步",
+            },
+            {
+                "action": "检查 MySQL 连接数使用情况",
+                "command": "# 登录 MySQL 后执行\nSHOW STATUS LIKE 'Threads_connected';\nSHOW STATUS LIKE 'Max_used_connections';\nSHOW VARIABLES LIKE 'max_connections';",
+                "expected": "Threads_connected 接近 max_connections 时表示连接数耗尽",
+                "judgment": "连接数耗尽→增加 max_connections 或优化连接池/长连接；未耗尽→继续下一步",
+            },
+            {
+                "action": "检查用户权限和认证",
+                "command": "# 从应用服务器用同样账号测试\nmysql -u<user> -p<password> -h<mysql_host> -P 3306 -e 'SELECT 1'\n# 登录后检查用户和权限\nSELECT user, host FROM mysql.user;\nSHOW GRANTS FOR '<user>'@'<host>';",
+                "expected": "能正常登录并执行 SELECT 1",
+                "judgment": "认证失败→检查用户名/密码/host 权限；权限不足→授权",
+            },
+            {
+                "action": "检查 bind-address 和 DNS 配置",
+                "command": "grep -E '^(bind-address|skip-name-resolve)' /etc/my.cnf /etc/mysql/my.cnf /etc/my.cnf.d/*.cnf 2>/dev/null",
+                "expected": "bind-address 包含应用 IP 或 0.0.0.0",
+                "judgment": "bind-address 只绑定 127.0.0.1 且应用远程访问→改为 0.0.0.0 或具体 IP",
+            },
+        ],
+        "verify": "应用能正常连接 MySQL 并执行查询。",
+        "rollback": "如果修改了 my.cnf 或授权导致异常：\n# 回滚 my.cnf 配置\ncp /etc/my.cnf.bak /etc/my.cnf\nsystemctl restart mysql\n# 如果误删用户，重新创建\nCREATE USER '<user>'@'<host>' IDENTIFIED BY '<password>';\nGRANT ALL PRIVILEGES ON <db>.* TO '<user>'@'<host>';",
+    },
+    # ─────────────── 25. Nacos 不可用 ───────────────
+    {
+        "id": "nacos-unavailable",
+        "title": "Nacos 不可用排查",
+        "keywords": [
+            "nacos 不可用", "nacos 连不上", "nacos 失败", "nacos 连接超时",
+            "nacos 注册失败", "nacos 服务发现", "nacos unavailable", "nacos connection"
+        ],
+        "summary": "应用无法连接 Nacos，服务注册/发现失败。常见原因：Nacos 服务未启动、网络/端口不可达、配置中心鉴权失败、命名空间错误、客户端版本不兼容。",
+        "root_causes": [
+            {"cause": "Nacos 服务未启动或集群节点异常", "verify": "Nacos 控制台 / 进程状态", "probability": "高"},
+            {"cause": "网络/端口不可达", "verify": "telnet nacos-host 8848", "probability": "高"},
+            {"cause": "命名空间 ID 配置错误", "verify": "application.yml / bootstrap.yml", "probability": "中"},
+            {"cause": "鉴权失败（用户名/密码/AK）", "verify": "Nacos 鉴权配置", "probability": "中"},
+            {"cause": "Nacos 数据库异常", "verify": "mysql 连接状态 / nacos logs", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "确认 Nacos 服务状态",
+                "command": "# Nacos 服务器\nps -ef | grep nacos\ncurl -s http://<nacos-host>:8848/nacos/v1/console/health/readiness",
+                "expected": "Nacos 进程存在，readiness 接口返回 ok",
+                "judgment": "服务未启动→启动；readiness 失败→查看 nacos/logs 目录",
+            },
+            {
+                "action": "测试端口连通性",
+                "command": "# 从应用服务器\ntelnet <nacos-host> 8848\n# 或\ncurl -v telnet://<nacos-host>:8848",
+                "expected": "8848 端口可达",
+                "judgment": "端口不通→检查防火墙/安全组；端口通→继续下一步",
+            },
+            {
+                "action": "检查客户端 Nacos 配置",
+                "command": "grep -E 'server-addr|namespace|username|password' application.yml bootstrap.yml 2>/dev/null",
+                "expected": "server-addr、namespace、username 配置正确",
+                "judgment": "namespace 错误→修正；用户名密码错误→重新配置",
+            },
+            {
+                "action": "检查 Nacos 鉴权和权限",
+                "command": "# 登录 Nacos 控制台查看用户/权限\n# 或 curl 测试登录\ncurl -X POST 'http://<nacos-host>:8848/nacos/v1/auth/users/login' -d 'username=<user>&password=<pass>'",
+                "expected": "返回 accessToken",
+                "judgment": "鉴权失败→检查用户名密码/是否开启鉴权；未开启鉴权但配置了密码→关闭鉴权或开启鉴权",
+            },
+            {
+                "action": "检查 Nacos 数据库",
+                "command": "tail -n 100 /opt/nacos/logs/nacos.log\n# 或查看 nacos/conf/application.properties 里的数据库配置",
+                "expected": "无数据库连接报错",
+                "judgment": "数据库报错→检查 MySQL 可用性和连接配置",
+            },
+        ],
+        "verify": "应用能成功注册到 Nacos 并在控制台看到服务实例。",
+        "rollback": "如果修改配置导致异常：\n# 恢复备份的 application.yml\ncp application.yml.bak application.yml\n# 重启应用\nsystemctl restart <app>",
+    },
+    # ─────────────── 26. Kafka Topic Lag 高 ───────────────
+    {
+        "id": "kafka-topic-lag",
+        "title": "Kafka Topic Lag 高排查",
+        "keywords": [
+            "kafka lag", "kafka topic lag", "kafka 消费延迟", "kafka 消费滞后",
+            "kafka 消费慢", "consumer lag", "kafka 堆积", "kafka 消息积压"
+        ],
+        "summary": "Kafka 消费者跟不上生产速度，导致 topic lag 持续升高。常见原因：消费能力不足、分区数太少、消费者异常重启、处理逻辑慢、GC 暂停。",
+        "root_causes": [
+            {"cause": "消费者数量不足或消费能力不够", "verify": "consumer group member 数量", "probability": "高"},
+            {"cause": "分区数太少，无法横向扩展", "verify": "topic 分区数", "probability": "高"},
+            {"cause": "单条消息处理耗时过长", "verify": "消费端日志/监控", "probability": "中"},
+            {"cause": "消费者频繁 rebalance", "verify": "consumer 日志", "probability": "中"},
+            {"cause": "网络/IO 瓶颈或 GC 暂停", "verify": "iostat/top/jstat", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "查看 consumer group 的 lag",
+                "command": "kafka-consumer-groups.sh --bootstrap-server <broker:9092> --describe --group <group-id>",
+                "expected": "看到每个 partition 的 CURRENT-OFFSET / LOG-END-OFFSET / LAG",
+                "judgment": "lag 集中在某些 partition→分区不均；整体 lag 高→消费能力不够",
+            },
+            {
+                "action": "检查消费者实例数量",
+                "command": "kafka-consumer-groups.sh --bootstrap-server <broker:9092> --describe --group <group-id> | awk '{print $NF}' | sort | uniq -c",
+                "expected": "消费者数量与分区数匹配",
+                "judgment": "消费者数 < 分区数→扩容消费者；消费者数 ≥ 分区数→考虑增加分区",
+            },
+            {
+                "action": "检查消息处理耗时",
+                "command": "# 查看消费端日志或 APM 链路\ngrep -Ei 'consume|process' /var/log/<consumer>.log | tail -n 100",
+                "expected": "单条消息处理时间合理（如 <100ms）",
+                "judgment": "处理慢→优化业务逻辑/增加并发/批量处理；正常→继续下一步",
+            },
+            {
+                "action": "检查 rebalance 频率",
+                "command": "grep -i 'rebalance' /var/log/<consumer>.log | tail -20",
+                "expected": "无频繁 rebalance 日志",
+                "judgment": "频繁 rebalance→检查 session.timeout.ms / heartbeat.interval.ms / max.poll.records",
+            },
+            {
+                "action": "临时扩容并观察",
+                "command": "# 增加 consumer 实例\nkubectl scale deployment/<consumer> --replicas=<n> -n <namespace>\n# 或增加分区\nkafka-topics.sh --bootstrap-server <broker:9092> --alter --topic <topic> --partitions <n>",
+                "expected": "lag 开始下降",
+                "judgment": "扩容有效→保持并监控；无效→深入排查业务逻辑或数据倾斜",
+            },
+        ],
+        "verify": "consumer lag 稳定在合理水位，消息消费速率 ≥ 生产速率。",
+        "rollback": "如果扩容后有问题：\n# 缩回 consumer 副本\nkubectl scale deployment/<consumer> --replicas=<原副本数>\n# 或恢复分区数（不可减少，只能重建 topic）",
+    },
+    # ─────────────── 27. Prometheus Alert Storm ───────────────
+    {
+        "id": "prometheus-alert-storm",
+        "title": "Prometheus 告警风暴排查",
+        "keywords": [
+            "prometheus 告警风暴", "prometheus alert storm", "告警风暴", "alertmanager 轰炸",
+            "prometheus 告警太多", "告警轰炸", "alertmanager 静默", "prometheus 告警泛滥",
+            "告警一直在响", "告警停不下来", "告警不停", "告警太多", "告警泛滥", "告警刷屏"
+        ],
+        "summary": "Prometheus 触发大量告警，Alertmanager 消息轰炸。常见原因：阈值过严、目标批量离线、标签聚合不当、抑制/静默缺失、上游依赖故障引发级联告警。",
+        "root_causes": [
+            {"cause": "告警阈值设置过严或采样窗口太短", "verify": "告警规则 expr", "probability": "高"},
+            {"cause": "大量 target 同时离线（网络抖动/重启）", "verify": "up metric / target 状态", "probability": "高"},
+            {"cause": "Alertmanager 分组/抑制/路由配置缺失", "verify": "alertmanager.yml", "probability": "中"},
+            {"cause": "上游依赖故障导致级联告警", "verify": "依赖服务状态", "probability": "中"},
+            {"cause": "flapping alert（阈值附近反复横跳）", "verify": "告警历史", "probability": "低"},
+        ],
+        "steps": [
+            {
+                "action": "确认告警数量和来源",
+                "command": "# Alertmanager 页面查看\ncurl -s http://<alertmanager>:9093/api/v2/alerts | jq '.[] | .labels.alertname' | sort | uniq -c | sort -rn | head -20",
+                "expected": "定位告警量最高的 alertname",
+                "judgment": "少数几个 alertname 占多数→调整阈值或分组；分布广泛→目标批量异常",
+            },
+            {
+                "action": "检查 Prometheus 告警规则",
+                "command": "cat /etc/prometheus/rules/*.yml | grep -A 5 'alert:'\n# 关注 for 字段和 expr 条件",
+                "expected": "阈值合理，for 字段不是 0s 或太短",
+                "judgment": "阈值过严→放宽；for=0s→增加到 1m-5m；缺少聚合→加 group_by",
+            },
+            {
+                "action": "检查 target 可用性",
+                "command": "promql: up == 0\n# 或\ncurl -s 'http://<prometheus>:9090/api/v1/query?query=up%3D%3D0' | jq",
+                "expected": "确认是否大量 target 同时 down",
+                "judgment": "大量 target down→检查网络/探针/目标服务；少量→单独排查",
+            },
+            {
+                "action": "检查 Alertmanager 路由/抑制/分组",
+                "command": "cat /etc/alertmanager/alertmanager.yml\n# 关注 group_by / group_wait / group_interval / repeat_interval / routes / inhibit_rules",
+                "expected": "有合理的分组、抑制和重复间隔",
+                "judgment": "缺少分组→按 alertname/cluster/service 分组；缺少抑制→添加 inhibit_rules；重复间隔太短→提高 repeat_interval",
+            },
+            {
+                "action": "临时静默并修复根因",
+                "command": "# 在 Alertmanager 页面创建 silence\n# 或用 API\ncurl -X POST http://<alertmanager>:9093/api/v2/silences -d '{\"matchers\":[{\"name\":\"alertname\",\"value\":\"<name>\"}],\"startsAt\":\"<now>\",\"endsAt\":\"<+1h>\",\"createdBy\":\"ops\",\"comment\":\"排查中\"}'",
+                "expected": "告警轰炸停止，留出修复时间",
+                "judgment": "静默是临时止血，必须同步修复根因；修复后删除 silence",
+            },
+        ],
+        "verify": "告警数量回落到正常水位，关键告警仍能正常触达，无效告警减少。",
+        "rollback": "如果静默导致漏掉关键告警：\n# 删除 silence\ncurl -X DELETE http://<alertmanager>:9093/api/v2/silence/<id>\n# 如果改了规则，回滚备份\ncp /etc/prometheus/rules.bak/*.yml /etc/prometheus/rules/\npkill -HUP prometheus",
     },
 ]
 
